@@ -2,14 +2,12 @@ import React, { useState, useCallback, useEffect } from 'react';
 import Modal from '../components/Modal';
 import { ToastContainer, createToast } from '../components/Toast';
 import { useUserProfile } from '../contexts/UserProfileContext';
-import { useDemoData } from '../contexts/DemoDataContext';
 
-type SettingsSection = 'profile' | 'notifications' | 'security' | 'demo';
+type SettingsSection = 'profile' | 'notifications' | 'security';
 
 
 const Settings: React.FC = () => {
     const { profile, updateProfile, addSubject, removeSubject } = useUserProfile();
-    const { hasDemoData, loadDemoData, clearDemoData } = useDemoData();
     const [activeSection, setActiveSection] = useState<SettingsSection>('profile');
     const [newSubject, setNewSubject] = useState('');
     const [showHelpModal, setShowHelpModal] = useState(false);
@@ -159,17 +157,6 @@ const Settings: React.FC = () => {
                                     >
                                         <span className="material-symbols-outlined text-[20px] group-hover:scale-110 transition-transform">shield</span>
                                         <span className="text-sm">Security & Login</span>
-                                    </button>
-                                    <button 
-                                        onClick={() => setActiveSection('demo')}
-                                        className={`flex items-center gap-3 px-4 py-3 rounded-2xl transition-all text-left group ${
-                                            activeSection === 'demo' 
-                                                ? 'bg-background text-stone-900 font-bold' 
-                                                : 'text-secondary hover:text-stone-900 hover:bg-stone-50'
-                                        }`}
-                                    >
-                                        <span className="material-symbols-outlined text-[20px] group-hover:scale-110 transition-transform">database</span>
-                                        <span className="text-sm">Demo Data</span>
                                     </button>
                                 </nav>
                             </div>
@@ -382,103 +369,6 @@ const Settings: React.FC = () => {
                                         </div>
                                         <span className="material-symbols-outlined text-stone-400 group-hover:translate-x-1 transition-transform">chevron_right</span>
                                     </button>
-                                </div>
-                            </div>
-                            )}
-
-                            {/* Demo Data Section */}
-                            {activeSection === 'demo' && (
-                            <div className="bg-surface rounded-3xl p-8 bento-card shadow-card border border-white">
-                                <div className="flex items-center justify-between mb-8">
-                                    <div>
-                                        <h3 className="text-xl font-bold text-stone-800">Demo Data</h3>
-                                        <p className="text-sm text-secondary">Load sample data to test all features of the application.</p>
-                                    </div>
-                                </div>
-                                
-                                <div className="space-y-6">
-                                    <div className="p-6 rounded-2xl bg-stone-50 border border-stone-200">
-                                        <div className="flex items-start gap-4">
-                                            <div className="size-12 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">
-                                                <span className="material-symbols-outlined text-primary text-[24px]">database</span>
-                                            </div>
-                                            <div className="flex-1">
-                                                <h4 className="text-sm font-bold text-stone-900 mb-2">Sample Data</h4>
-                                                <p className="text-xs text-stone-600 mb-4">
-                                                    Load demo data including 5 students with different subjects, past and future lessons, 
-                                                    earnings transactions, and todos. This will help you explore all features of the app.
-                                                </p>
-                                                <div className="space-y-2 mb-4">
-                                                    <div className="flex items-center gap-2 text-xs text-stone-600">
-                                                        <span className="material-symbols-outlined text-[16px]">check_circle</span>
-                                                        <span>5 students with pricing and schedules</span>
-                                                    </div>
-                                                    <div className="flex items-center gap-2 text-xs text-stone-600">
-                                                        <span className="material-symbols-outlined text-[16px]">check_circle</span>
-                                                        <span>Past and future lessons</span>
-                                                    </div>
-                                                    <div className="flex items-center gap-2 text-xs text-stone-600">
-                                                        <span className="material-symbols-outlined text-[16px]">check_circle</span>
-                                                        <span>10 earnings transactions</span>
-                                                    </div>
-                                                    <div className="flex items-center gap-2 text-xs text-stone-600">
-                                                        <span className="material-symbols-outlined text-[16px]">check_circle</span>
-                                                        <span>Sample todos and chart data</span>
-                                                    </div>
-                                                </div>
-                                                {hasDemoData ? (
-                                                    <div className="p-4 rounded-xl bg-green-50 border border-green-200 mb-4">
-                                                        <div className="flex items-center gap-2 mb-1">
-                                                            <span className="material-symbols-outlined text-green-600 text-[20px]">check_circle</span>
-                                                            <span className="text-sm font-bold text-green-900">Demo data is loaded</span>
-                                                        </div>
-                                                        <p className="text-xs text-green-700">You can clear it anytime to start fresh.</p>
-                                                    </div>
-                                                ) : (
-                                                    <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 mb-4">
-                                                        <div className="flex items-center gap-2 mb-1">
-                                                            <span className="material-symbols-outlined text-amber-600 text-[20px]">info</span>
-                                                            <span className="text-sm font-bold text-amber-900">No demo data loaded</span>
-                                                        </div>
-                                                        <p className="text-xs text-amber-700">Click the button below to load sample data.</p>
-                                                    </div>
-                                                )}
-                                                <div className="flex gap-3">
-                                                    {!hasDemoData ? (
-                                                        <button
-                                                            onClick={() => {
-                                                                loadDemoData();
-                                                                createToast('Loading demo data...', 'info', setToasts);
-                                                                setTimeout(() => {
-                                                                    window.location.reload();
-                                                                }, 500);
-                                                            }}
-                                                            className="px-6 py-3 rounded-full bg-primary text-primary-content font-bold text-sm hover:bg-yellow-400 transition-colors shadow-lg flex items-center gap-2"
-                                                        >
-                                                            <span className="material-symbols-outlined text-[20px]">database</span>
-                                                            <span>Load Demo Data</span>
-                                                        </button>
-                                                    ) : (
-                                                        <button
-                                                            onClick={() => {
-                                                                if (window.confirm('Are you sure you want to clear all demo data? This will remove all students, lessons, and transactions.')) {
-                                                                    clearDemoData();
-                                                                    createToast('Clearing demo data...', 'info', setToasts);
-                                                                    setTimeout(() => {
-                                                                        window.location.reload();
-                                                                    }, 500);
-                                                                }
-                                                            }}
-                                                            className="px-6 py-3 rounded-full border border-red-200 text-red-600 bg-red-50 font-bold text-sm hover:bg-red-100 transition-colors flex items-center gap-2"
-                                                        >
-                                                            <span className="material-symbols-outlined text-[20px]">delete</span>
-                                                            <span>Clear Demo Data</span>
-                                                        </button>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
                                 </div>
                             </div>
                             )}

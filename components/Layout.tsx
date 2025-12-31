@@ -16,12 +16,10 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
     const handleLoadDemoData = () => {
         loadDemoData();
-        createToast('Loading demo data...', 'info', setToasts);
+        createToast('Demo data loaded successfully!', 'success', setToasts);
         setShowDemoDataModal(false);
-        // Small delay to ensure localStorage is written before reload
-        setTimeout(() => {
-            window.location.reload();
-        }, 100);
+        // Reload the page to refresh all components
+        window.location.reload();
     };
 
     const handleClearDemoData = () => {
@@ -67,7 +65,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
             {/* Mobile Menu Overlay */}
             {mobileMenuOpen && (
-                <div className="fixed inset-0 z-40 bg-surface/95 backdrop-blur-md lg:hidden flex flex-col pt-24 px-6 gap-4 pb-6">
+                <div className="fixed inset-0 z-40 bg-surface/95 backdrop-blur-md lg:hidden flex flex-col pt-24 px-6 gap-4">
                     {navItems.map((item) => (
                          <NavLink
                             key={item.path}
@@ -84,20 +82,6 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                             <span className="text-lg">{item.name}</span>
                         </NavLink>
                     ))}
-                    <button
-                        onClick={() => {
-                            setShowDemoDataModal(true);
-                            setMobileMenuOpen(false);
-                        }}
-                        className={`flex items-center gap-4 px-4 py-4 rounded-2xl transition-all duration-200 ${
-                            hasDemoData 
-                                ? 'bg-stone-100 text-stone-700 border border-stone-200' 
-                                : 'bg-primary text-primary-content'
-                        }`}
-                    >
-                        <span className="material-symbols-outlined text-[24px]">database</span>
-                        <span className="text-lg">{hasDemoData ? 'Demo Data' : 'Load Demo Data'}</span>
-                    </button>
                 </div>
             )}
 
@@ -131,17 +115,15 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                 </nav>
 
                 <div className="mt-auto space-y-3">
-                    <button
-                        onClick={() => setShowDemoDataModal(true)}
-                        className={`w-full px-4 py-3 rounded-2xl font-bold text-sm transition-colors shadow-lg flex items-center justify-center gap-2 ${
-                            hasDemoData 
-                                ? 'bg-stone-100 text-stone-700 hover:bg-stone-200 border border-stone-200' 
-                                : 'bg-primary text-primary-content hover:bg-yellow-400'
-                        }`}
-                    >
-                        <span className="material-symbols-outlined text-[20px]">database</span>
-                        <span className="hidden xl:inline">{hasDemoData ? 'Demo Data' : 'Load Demo Data'}</span>
-                    </button>
+                    {!hasDemoData && (
+                        <button
+                            onClick={() => setShowDemoDataModal(true)}
+                            className="w-full px-4 py-3 rounded-2xl bg-primary text-primary-content font-bold text-sm hover:bg-yellow-400 transition-colors shadow-lg flex items-center justify-center gap-2"
+                        >
+                            <span className="material-symbols-outlined text-[20px]">database</span>
+                            <span className="hidden xl:inline">Load Demo Data</span>
+                        </button>
+                    )}
                     <div className="p-4 rounded-3xl bg-surface border border-white shadow-soft flex flex-col gap-3">
                         <div className="flex items-center gap-3">
                             <div 

@@ -293,11 +293,6 @@ const Students: React.FC = () => {
                                                 </span>
                                             </td>
                                             <td className="px-6 py-4 border-y border-transparent bg-white group-hover:border-border">
-                                                <span className="text-xs font-bold text-stone-800">
-                                                    {student.pricePerHour ? `$${student.pricePerHour.toFixed(2)}` : 'Not set'}
-                                                </span>
-                                            </td>
-                                            <td className="px-6 py-4 border-y border-transparent bg-white group-hover:border-border">
                                                 <span className="text-xs font-bold text-stone-600">{student.progress || 'Not set'}</span>
                                             </td>
                                              <td className="px-6 py-4 border-y border-transparent bg-white group-hover:border-border">
