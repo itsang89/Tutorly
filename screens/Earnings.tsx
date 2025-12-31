@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { ToastContainer, createToast } from '../components/Toast';
 import { useEarnings } from '../contexts/EarningsContext';
+import { calculateTotalEarnings, calculateEarningsThisMonth, calculateAverageHourlyRate } from '../utils/earningsCalculations';
 
 const Earnings: React.FC = () => {
     const { transactions } = useEarnings();
@@ -14,18 +15,9 @@ const Earnings: React.FC = () => {
         const currentMonth = now.getMonth();
         const currentYear = now.getFullYear();
 
-        const totalBalance = transactions.reduce((sum, t) => sum + t.amount, 0);
-        
-        const thisMonthTransactions = transactions.filter(t => {
-            const transactionDate = new Date(t.date);
-            return transactionDate.getMonth() === currentMonth && 
-                   transactionDate.getFullYear() === currentYear;
-        });
-        const thisMonth = thisMonthTransactions.reduce((sum, t) => sum + t.amount, 0);
-        
-        // Calculate average hourly rate
-        const totalHours = transactions.reduce((sum, t) => sum + (t.duration || 0), 0);
-        const avgHourlyRate = totalHours > 0 ? totalBalance / totalHours : 0;
+        const totalBalance = calculateTotalEarnings(transactions);
+        const thisMonth = calculateEarningsThisMonth(transactions);
+        const avgHourlyRate = calculateAverageHourlyRate(transactions);
 
         // Calculate previous month for comparison
         const prevMonth = currentMonth === 0 ? 11 : currentMonth - 1;
@@ -40,11 +32,25 @@ const Earnings: React.FC = () => {
             ? ((thisMonth - prevMonthTotal) / prevMonthTotal) * 100 
             : 0;
 
+        // Calculate previous period total balance for percentage change
+        // Compare with balance from 30 days ago
+        const thirtyDaysAgo = new Date(now);
+        thirtyDaysAgo.setDate(now.getDate() - 30);
+        const prevPeriodTransactions = transactions.filter(t => {
+            const transactionDate = new Date(t.date);
+            return transactionDate < thirtyDaysAgo;
+        });
+        const prevPeriodTotal = prevPeriodTransactions.reduce((sum, t) => sum + t.amount, 0);
+        const totalBalanceChange = prevPeriodTotal > 0 
+            ? ((totalBalance - prevPeriodTotal) / prevPeriodTotal) * 100 
+            : (totalBalance > 0 ? 100 : 0);
+
         return {
             totalBalance,
             thisMonth,
             avgHourlyRate,
             monthChange,
+            totalBalanceChange,
         };
     }, [transactions]);
 
@@ -174,9 +180,10 @@ const Earnings: React.FC = () => {
                 <div className="flex items-center gap-4">
                      <button 
                         onClick={handleExport}
-                        className="px-5 h-12 rounded-full bg-surface border border-white text-stone-700 font-bold text-sm hover:bg-stone-50 transition-colors shadow-sm flex items-center gap-2"
+                        aria-label="Export earnings data"
+                        className="px-5 h-12 rounded-full bg-surface border border-white text-stone-700 font-bold text-sm hover:bg-stone-50 transition-colors shadow-sm flex items-center gap-2 focus:ring-2 focus:ring-primary/50 focus:outline-none"
                     >
-                        <span className="material-symbols-outlined text-[20px]">download</span>
+                        <span className="material-symbols-outlined text-[20px]" aria-hidden="true">download</span>
                         <span>Export</span>
                     </button>
                 </div>
@@ -184,6 +191,18 @@ const Earnings: React.FC = () => {
 
             <div className="flex-1 overflow-y-auto px-4 lg:px-10 pb-10 custom-scrollbar">
                 <div className="max-w-[1400px] mx-auto">
+                    {/* Mobile Export Button */}
+                    <div className="lg:hidden mb-6">
+                        <button 
+                            onClick={handleExport}
+                            aria-label="Export earnings data"
+                            className="w-full px-5 h-12 rounded-full bg-surface border border-white text-stone-700 font-bold text-sm hover:bg-stone-50 transition-colors shadow-sm flex items-center justify-center gap-2 focus:ring-2 focus:ring-primary/50 focus:outline-none"
+                        >
+                            <span className="material-symbols-outlined text-[20px]" aria-hidden="true">download</span>
+                            <span>Export CSV</span>
+                        </button>
+                    </div>
+
                     {/* Stats */}
                     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 mb-8">
                         <div className="bg-accent rounded-3xl p-6 shadow-xl shadow-stone-900/10 border border-stone-800 text-white relative overflow-hidden bento-card">
@@ -193,7 +212,11 @@ const Earnings: React.FC = () => {
                                     <div className="size-10 rounded-full bg-white/10 flex items-center justify-center backdrop-blur-sm">
                                         <span className="material-symbols-outlined text-primary text-[20px]">account_balance</span>
                                     </div>
-                                    <span className="bg-primary/20 text-primary px-2 py-1 rounded-full text-[10px] font-bold">+0%</span>
+                                    <span className={`bg-primary/20 text-primary px-2 py-1 rounded-full text-[10px] font-bold ${
+                                        stats.totalBalanceChange >= 0 ? '' : 'bg-red-500/20 text-red-500'
+                                    }`}>
+                                        {stats.totalBalanceChange >= 0 ? '+' : ''}{stats.totalBalanceChange.toFixed(1)}%
+                                    </span>
                                 </div>
                                 <div>
                                     <span className="text-stone-400 text-xs font-medium uppercase tracking-wider">Total Balance</span>
@@ -312,19 +335,56 @@ const Earnings: React.FC = () => {
                                 <div className="relative more-options">
                                     <button 
                                         onClick={() => setShowMoreOptions(!showMoreOptions)}
-                                        className="size-8 rounded-full bg-stone-50 flex items-center justify-center hover:bg-stone-100"
+                                        aria-label="More options"
+                                        aria-expanded={showMoreOptions}
+                                        className="size-8 rounded-full bg-stone-50 flex items-center justify-center hover:bg-stone-100 focus:ring-2 focus:ring-primary/50 focus:outline-none"
                                     >
-                                        <span className="material-symbols-outlined text-[16px] text-stone-500">more_horiz</span>
+                                        <span className="material-symbols-outlined text-[16px] text-stone-500" aria-hidden="true">more_horiz</span>
                                     </button>
                                     {showMoreOptions && (
                                         <div className="absolute right-0 top-10 w-48 bg-surface rounded-2xl shadow-xl border border-white p-2 z-50">
-                                            <button className="w-full px-3 py-2 rounded-xl text-left text-sm text-stone-700 hover:bg-stone-50 transition-colors">
+                                            <button 
+                                                onClick={() => {
+                                                    createToast('Subject details view coming soon', 'info', setToasts);
+                                                    setShowMoreOptions(false);
+                                                }}
+                                                className="w-full px-3 py-2 rounded-xl text-left text-sm text-stone-700 hover:bg-stone-50 transition-colors"
+                                            >
                                                 View Details
                                             </button>
-                                            <button className="w-full px-3 py-2 rounded-xl text-left text-sm text-stone-700 hover:bg-stone-50 transition-colors">
+                                            <button 
+                                                onClick={() => {
+                                                    // Export subject breakdown data
+                                                    const csv = [
+                                                        ['Subject', 'Amount', 'Percentage'],
+                                                        ...subjectData.map(item => [
+                                                            item.subject,
+                                                            `$${item.amount.toFixed(2)}`,
+                                                            `${item.percentage.toFixed(1)}%`
+                                                        ])
+                                                    ].map(row => row.join(',')).join('\n');
+                                                    
+                                                    const blob = new Blob([csv], { type: 'text/csv' });
+                                                    const url = window.URL.createObjectURL(blob);
+                                                    const a = document.createElement('a');
+                                                    a.href = url;
+                                                    a.download = `earnings-by-subject-${new Date().toISOString().split('T')[0]}.csv`;
+                                                    a.click();
+                                                    window.URL.revokeObjectURL(url);
+                                                    createToast('Subject data exported successfully!', 'success', setToasts);
+                                                    setShowMoreOptions(false);
+                                                }}
+                                                className="w-full px-3 py-2 rounded-xl text-left text-sm text-stone-700 hover:bg-stone-50 transition-colors"
+                                            >
                                                 Export Data
                                             </button>
-                                            <button className="w-full px-3 py-2 rounded-xl text-left text-sm text-stone-700 hover:bg-stone-50 transition-colors">
+                                            <button 
+                                                onClick={() => {
+                                                    createToast('Subject settings coming soon', 'info', setToasts);
+                                                    setShowMoreOptions(false);
+                                                }}
+                                                className="w-full px-3 py-2 rounded-xl text-left text-sm text-stone-700 hover:bg-stone-50 transition-colors"
+                                            >
                                                 Settings
                                             </button>
                                         </div>

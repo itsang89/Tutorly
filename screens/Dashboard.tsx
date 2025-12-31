@@ -8,7 +8,9 @@ import { useDemoData } from '../contexts/DemoDataContext';
 import { useUserProfile } from '../contexts/UserProfileContext';
 import { useSchedule } from '../contexts/ScheduleContext';
 import { useStudents } from '../contexts/StudentsContext';
+import { useEarnings } from '../contexts/EarningsContext';
 import { TodoItem } from '../data/demoData';
+import { calculateEarningsThisMonth, calculateEarningsThisWeek, calculateTotalEarnings } from '../utils/earningsCalculations';
 
 const Dashboard: React.FC = () => {
     const navigate = useNavigate();
@@ -16,7 +18,7 @@ const Dashboard: React.FC = () => {
     const { profile } = useUserProfile();
     const { allScheduleItems, currentDate, setCurrentDate, addScheduleItem } = useSchedule();
     const { students } = useStudents();
-    const [searchTerm, setSearchTerm] = useState('');
+    const { transactions } = useEarnings();
     const [showNotifications, setShowNotifications] = useState(false);
     const [showNewClassModal, setShowNewClassModal] = useState(false);
     const [showAddStudentModal, setShowAddStudentModal] = useState(false);
@@ -25,6 +27,7 @@ const Dashboard: React.FC = () => {
     const [chartPeriod, setChartPeriod] = useState<'weekly' | 'monthly'>('weekly');
     const [todos, setTodos] = useState<TodoItem[]>([]);
     const [toasts, setToasts] = useState<Array<{ id: string; message: string; type?: 'success' | 'error' | 'info' | 'warning' }>>([]);
+    const [notificationsRead, setNotificationsRead] = useState(false);
 
     useEffect(() => {
         if (hasDemoData) {
@@ -35,11 +38,31 @@ const Dashboard: React.FC = () => {
         }
     }, [hasDemoData, getDemoData]);
 
-    const chartData = hasDemoData 
-        ? (chartPeriod === 'weekly' ? getDemoData().weeklyChartData : getDemoData().monthlyChartData)
-        : (chartPeriod === 'weekly' 
-            ? [{ name: 'Mon', value: 0 }, { name: 'Tue', value: 0 }, { name: 'Wed', value: 0 }, { name: 'Thu', value: 0 }, { name: 'Fri', value: 0 }, { name: 'Sat', value: 0 }, { name: 'Sun', value: 0 }]
-            : [{ name: 'Jan', value: 0 }, { name: 'Feb', value: 0 }, { name: 'Mar', value: 0 }, { name: 'Apr', value: 0 }, { name: 'May', value: 0 }, { name: 'Jun', value: 0 }]);
+    const chartData = useMemo(() => {
+        let data: Array<{ name: string; value: number }> = [];
+        
+        if (hasDemoData) {
+            const demo = getDemoData();
+            data = chartPeriod === 'weekly' ? demo.weeklyChartData : demo.monthlyChartData;
+        } else {
+            data = chartPeriod === 'weekly' 
+                ? [{ name: 'Mon', value: 0 }, { name: 'Tue', value: 0 }, { name: 'Wed', value: 0 }, { name: 'Thu', value: 0 }, { name: 'Fri', value: 0 }, { name: 'Sat', value: 0 }, { name: 'Sun', value: 0 }]
+                : [{ name: 'Jan', value: 0 }, { name: 'Feb', value: 0 }, { name: 'Mar', value: 0 }, { name: 'Apr', value: 0 }, { name: 'May', value: 0 }, { name: 'Jun', value: 0 }];
+        }
+        
+        // Validate data: ensure it's an array with valid entries
+        if (!Array.isArray(data) || data.length === 0) {
+            return chartPeriod === 'weekly' 
+                ? [{ name: 'Mon', value: 0 }, { name: 'Tue', value: 0 }, { name: 'Wed', value: 0 }, { name: 'Thu', value: 0 }, { name: 'Fri', value: 0 }, { name: 'Sat', value: 0 }, { name: 'Sun', value: 0 }]
+                : [{ name: 'Jan', value: 0 }, { name: 'Feb', value: 0 }, { name: 'Mar', value: 0 }, { name: 'Apr', value: 0 }, { name: 'May', value: 0 }, { name: 'Jun', value: 0 }];
+        }
+        
+        // Validate each entry has required properties
+        return data.map(entry => ({
+            name: entry?.name || '',
+            value: typeof entry?.value === 'number' && !isNaN(entry.value) ? Math.max(0, entry.value) : 0
+        }));
+    }, [hasDemoData, getDemoData, chartPeriod]);
 
     const handleTodoToggle = useCallback((id: string) => {
         setTodos(prev => prev.map(todo => 
@@ -137,11 +160,20 @@ const Dashboard: React.FC = () => {
         });
     }, [getWeekDates]);
 
-    // Calculate classes today
+    // Calculate classes today (check actual date, not just day of week)
     const classesToday = useMemo(() => {
         const today = new Date();
+        const todayDateStr = today.toISOString().split('T')[0];
         const todayDayOfWeek = (today.getDay() + 6) % 7; // Convert Sunday=0 to Monday=0
-        return allScheduleItems.filter(item => item.day === todayDayOfWeek).length;
+        
+        return allScheduleItems.filter(item => {
+            // For items with specific dates, check if date matches today
+            if (item.date) {
+                return item.date === todayDateStr;
+            }
+            // For recurring items, check if day of week matches
+            return item.day === todayDayOfWeek;
+        }).length;
     }, [allScheduleItems]);
 
     // Calculate total sessions count
@@ -154,15 +186,53 @@ const Dashboard: React.FC = () => {
         return students.filter(s => s.status === 'Active').length;
     }, [students]);
 
-    // Calculate sessions completed this month
+    // Calculate sessions completed this month (only past sessions with dates)
     const sessionsThisMonth = useMemo(() => {
         const now = new Date();
         const currentMonth = now.getMonth();
         const currentYear = now.getFullYear();
-        // For now, we'll count all schedule items as completed sessions
-        // In a real app, you'd track which sessions were actually completed
-        return allScheduleItems.length;
+        
+        return allScheduleItems.filter(item => {
+            // Only count items with specific dates (one-time sessions)
+            if (!item.date) return false;
+            
+            const sessionDate = new Date(item.date);
+            // Check if session is in current month and year
+            if (sessionDate.getMonth() !== currentMonth || sessionDate.getFullYear() !== currentYear) {
+                return false;
+            }
+            
+            // Check if session has passed (including end time)
+            const [hours, minutes] = [Math.floor(item.startTime), Math.round((item.startTime % 1) * 60)];
+            const sessionDateTime = new Date(sessionDate);
+            sessionDateTime.setHours(hours, minutes, 0, 0);
+            const sessionEndTime = new Date(sessionDateTime);
+            sessionEndTime.setHours(sessionEndTime.getHours() + item.duration);
+            
+            return sessionEndTime < now;
+        }).length;
     }, [allScheduleItems]);
+
+    // Calculate total earnings
+    const totalEarnings = useMemo(() => {
+        return calculateTotalEarnings(transactions);
+    }, [transactions]);
+
+    // Calculate earnings this month
+    const earningsThisMonth = useMemo(() => {
+        return calculateEarningsThisMonth(transactions);
+    }, [transactions]);
+
+    // Calculate earnings this week
+    const earningsThisWeek = useMemo(() => {
+        return calculateEarningsThisWeek(transactions);
+    }, [transactions]);
+
+    // Calculate monthly goal percentage (default goal: $5000)
+    const monthlyGoal = 5000;
+    const monthlyGoalPercentage = useMemo(() => {
+        return Math.min(100, Math.round((earningsThisMonth / monthlyGoal) * 100));
+    }, [earningsThisMonth]);
 
     useEffect(() => {
         const handleClickOutside = (e: MouseEvent) => {
@@ -185,52 +255,60 @@ const Dashboard: React.FC = () => {
                     </div>
                 </div>
                 <div className="flex items-center gap-4">
-                    <div className="flex items-center bg-surface border border-white shadow-sm rounded-full px-5 h-12 w-64 focus-within:ring-2 focus-within:ring-primary/50 transition-all">
-                        <span className="material-symbols-outlined text-stone-400 text-[20px]">search</span>
-                        <input 
-                            id="search" 
-                            name="search" 
-                            className="bg-transparent border-none text-sm text-stone-800 placeholder-stone-400 focus:ring-0 w-full h-full ml-2" 
-                            placeholder="Search..." 
-                            type="text"
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                        />
-                    </div>
                     <div className="relative notifications-dropdown">
                         <button 
                             onClick={() => setShowNotifications(!showNotifications)}
-                            className="size-12 rounded-full bg-surface border border-white flex items-center justify-center text-stone-600 hover:text-stone-900 hover:shadow-md transition-all shadow-sm relative"
+                            aria-label="View notifications"
+                            className="size-12 rounded-full bg-surface border border-white flex items-center justify-center text-stone-600 hover:text-stone-900 hover:shadow-md transition-all shadow-sm relative focus:ring-2 focus:ring-primary/50 focus:outline-none"
                         >
-                            <span className="material-symbols-outlined text-[24px]">notifications</span>
-                            <span className="absolute top-1 right-1 size-2 bg-red-500 rounded-full"></span>
+                            <span className="material-symbols-outlined text-[24px]" aria-hidden="true">notifications</span>
+                            <span className="absolute top-1 right-1 size-2 bg-red-500 rounded-full" aria-hidden="true"></span>
                         </button>
                         {showNotifications && (
                             <div className="absolute right-0 top-14 w-80 bg-surface rounded-2xl shadow-xl border border-white p-4 z-50">
                                 <div className="flex items-center justify-between mb-4">
                                     <h3 className="font-bold text-stone-900">Notifications</h3>
-                                    <button className="text-xs text-primary hover:text-primary-content">Mark all read</button>
+                                    <button 
+                                        onClick={() => {
+                                            setNotificationsRead(true);
+                                            createToast('All notifications marked as read', 'success', setToasts);
+                                        }}
+                                        className="text-xs text-primary hover:text-primary-content"
+                                    >
+                                        Mark all read
+                                    </button>
                                 </div>
                                 <div className="space-y-2 max-h-96 overflow-y-auto">
-                                    <div className="p-3 rounded-xl bg-stone-50 hover:bg-stone-100 transition-colors">
-                                        <p className="text-sm font-bold text-stone-900">New student request</p>
-                                        <p className="text-xs text-stone-500">John Doe wants to join your class</p>
-                                        <p className="text-[10px] text-stone-400 mt-1">2 minutes ago</p>
-                                    </div>
-                                    <div className="p-3 rounded-xl bg-stone-50 hover:bg-stone-100 transition-colors">
-                                        <p className="text-sm font-bold text-stone-900">Payment received</p>
-                                        <p className="text-xs text-stone-500">$65 from James Smith</p>
-                                        <p className="text-[10px] text-stone-400 mt-1">1 hour ago</p>
-                                    </div>
+                                    {!notificationsRead && (
+                                        <>
+                                            <div className="p-3 rounded-xl bg-stone-50 hover:bg-stone-100 transition-colors">
+                                                <p className="text-sm font-bold text-stone-900">New student request</p>
+                                                <p className="text-xs text-stone-500">John Doe wants to join your class</p>
+                                                <p className="text-[10px] text-stone-400 mt-1">2 minutes ago</p>
+                                            </div>
+                                            <div className="p-3 rounded-xl bg-stone-50 hover:bg-stone-100 transition-colors">
+                                                <p className="text-sm font-bold text-stone-900">Payment received</p>
+                                                <p className="text-xs text-stone-500">$65 from James Smith</p>
+                                                <p className="text-[10px] text-stone-400 mt-1">1 hour ago</p>
+                                            </div>
+                                        </>
+                                    )}
+                                    {notificationsRead && (
+                                        <div className="p-8 text-center text-stone-400">
+                                            <span className="material-symbols-outlined text-4xl mb-2">notifications_none</span>
+                                            <p className="text-sm">No new notifications</p>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         )}
                     </div>
                     <button 
                         onClick={() => setShowNewClassModal(true)}
-                        className="px-5 h-12 rounded-full bg-accent text-white font-medium flex items-center gap-2 hover:bg-stone-800 transition-colors shadow-lg shadow-stone-800/20"
+                        aria-label="Create new class"
+                        className="px-5 h-12 rounded-full bg-accent text-white font-medium flex items-center gap-2 hover:bg-stone-800 transition-colors shadow-lg shadow-stone-800/20 focus:ring-2 focus:ring-primary/50 focus:outline-none"
                     >
-                        <span className="material-symbols-outlined text-[20px]">add</span>
+                        <span className="material-symbols-outlined text-[20px]" aria-hidden="true">add</span>
                         <span>New Class</span>
                     </button>
                 </div>
@@ -252,8 +330,8 @@ const Dashboard: React.FC = () => {
                             <span className="text-xs font-bold text-secondary uppercase tracking-widest whitespace-nowrap">Monthly Goal</span>
                             <div className="h-10 flex-1 bg-white rounded-full p-1 flex items-center relative overflow-hidden shadow-inner">
                                 <div className="absolute inset-0 opacity-20" style={{ backgroundImage: 'repeating-linear-gradient(45deg, #ccc 0, #ccc 1px, transparent 0, transparent 10px)' }}></div>
-                                <div className="h-full bg-accent rounded-full text-white text-xs font-bold flex items-center justify-center relative z-10 w-[0%]">
-                                    0%
+                                <div className="h-full bg-accent rounded-full text-white text-xs font-bold flex items-center justify-center relative z-10" style={{ width: `${monthlyGoalPercentage}%` }}>
+                                    {monthlyGoalPercentage}%
                                 </div>
                             </div>
                         </div>
@@ -262,7 +340,7 @@ const Dashboard: React.FC = () => {
                                 <span className="material-symbols-outlined text-stone-600 text-[20px]">payments</span>
                             </span>
                             <div className="flex flex-col">
-                                <span className="text-2xl font-light text-stone-800">$0</span>
+                                <span className="text-2xl font-light text-stone-800">${totalEarnings.toFixed(2)}</span>
                                 <span className="text-[10px] uppercase font-bold text-secondary">Earned</span>
                             </div>
                         </div>
@@ -295,9 +373,10 @@ const Dashboard: React.FC = () => {
                                     </div>
                                     <button 
                                         onClick={() => navigate('/settings')}
-                                        className="w-full h-10 rounded-full bg-white text-stone-900 font-bold text-sm hover:bg-primary transition-colors flex items-center justify-center gap-2"
+                                        aria-label="Edit profile"
+                                        className="w-full h-10 rounded-full bg-white text-stone-900 font-bold text-sm hover:bg-primary transition-colors flex items-center justify-center gap-2 focus:ring-2 focus:ring-primary/50 focus:outline-none"
                                     >
-                                        <span className="material-symbols-outlined text-[18px]">edit</span>
+                                        <span className="material-symbols-outlined text-[18px]" aria-hidden="true">edit</span>
                                         Edit Profile
                                     </button>
                                 </div>
@@ -310,13 +389,15 @@ const Dashboard: React.FC = () => {
                                 <div>
                                     <h3 className="text-lg font-bold text-stone-800">Earnings Summary</h3>
                                     <div className="flex items-baseline gap-2 mt-1">
-                                        <span className="text-4xl font-light text-stone-800">$0 <span className="text-sm text-stone-400 font-medium">this week</span></span>
+                                        <span className="text-4xl font-light text-stone-800">${chartPeriod === 'weekly' ? earningsThisWeek.toFixed(2) : earningsThisMonth.toFixed(2)} <span className="text-sm text-stone-400 font-medium">{chartPeriod === 'weekly' ? 'this week' : 'this month'}</span></span>
                                     </div>
                                 </div>
                                 <div className="flex gap-2">
                                     <button 
                                         onClick={() => setChartPeriod('weekly')}
-                                        className={`px-3 py-1 rounded-full text-xs font-bold transition-colors ${
+                                        aria-label="Show weekly earnings"
+                                        aria-pressed={chartPeriod === 'weekly'}
+                                        className={`px-3 py-1 rounded-full text-xs font-bold transition-colors focus:ring-2 focus:ring-primary/50 focus:outline-none ${
                                             chartPeriod === 'weekly' 
                                                 ? 'bg-stone-100 text-stone-600 hover:bg-stone-200' 
                                                 : 'bg-white border border-stone-200 text-stone-400 hover:text-stone-600'
@@ -326,7 +407,9 @@ const Dashboard: React.FC = () => {
                                     </button>
                                     <button 
                                         onClick={() => setChartPeriod('monthly')}
-                                        className={`px-3 py-1 rounded-full text-xs font-bold transition-colors ${
+                                        aria-label="Show monthly earnings"
+                                        aria-pressed={chartPeriod === 'monthly'}
+                                        className={`px-3 py-1 rounded-full text-xs font-bold transition-colors focus:ring-2 focus:ring-primary/50 focus:outline-none ${
                                             chartPeriod === 'monthly' 
                                                 ? 'bg-stone-100 text-stone-600 hover:bg-stone-200' 
                                                 : 'bg-white border border-stone-200 text-stone-400 hover:text-stone-600'
@@ -337,34 +420,45 @@ const Dashboard: React.FC = () => {
                                 </div>
                             </div>
                             <div className="flex-1 w-full relative -ml-2">
-                                <ResponsiveContainer width="100%" height="100%">
-                                    <BarChart data={chartData} barSize={40} margin={{ top: 10, right: 10, left: 10, bottom: 10 }}>
-                                        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={false} />
-                                        <YAxis axisLine={false} tickLine={false} tick={false} />
-                                        <Bar dataKey="value" radius={[10, 10, 0, 0]}>
-                                            {chartData.map((entry, index) => {
-                                                const isHighlight = chartPeriod === 'weekly' 
-                                                    ? (entry.name === 'Fri' || entry.name === 'Wed')
-                                                    : index === chartData.length - 1;
-                                                return (
-                                                    <Cell 
-                                                        key={`cell-${index}`} 
-                                                        fill={isHighlight ? (entry.name === 'Fri' || index === chartData.length - 1 ? '#FACC15' : '#292524') : '#E5E5E5'} 
-                                                    />
-                                                );
-                                            })}
-                                        </Bar>
-                                    </BarChart>
-                                </ResponsiveContainer>
-                                <div className="flex justify-between px-4 text-[10px] font-bold text-stone-400 uppercase mt-2">
-                                    {chartPeriod === 'weekly' ? (
-                                        <>
-                                            <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
-                                        </>
-                                    ) : (
-                                        chartData.map(entry => <span key={entry.name}>{entry.name}</span>)
-                                    )}
-                                </div>
+                                {chartData && chartData.length > 0 ? (
+                                    <>
+                                        <ResponsiveContainer width="100%" height="100%">
+                                            <BarChart data={chartData} barSize={40} margin={{ top: 10, right: 10, left: 10, bottom: 10 }}>
+                                                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={false} />
+                                                <YAxis axisLine={false} tickLine={false} tick={false} />
+                                                <Bar dataKey="value" radius={[10, 10, 0, 0]}>
+                                                    {chartData.map((entry, index) => {
+                                                        const isHighlight = chartPeriod === 'weekly' 
+                                                            ? (entry.name === 'Fri' || entry.name === 'Wed')
+                                                            : index === chartData.length - 1;
+                                                        return (
+                                                            <Cell 
+                                                                key={`cell-${index}`} 
+                                                                fill={isHighlight ? (entry.name === 'Fri' || index === chartData.length - 1 ? '#FACC15' : '#292524') : '#E5E5E5'} 
+                                                            />
+                                                        );
+                                                    })}
+                                                </Bar>
+                                            </BarChart>
+                                        </ResponsiveContainer>
+                                        <div className="flex justify-between px-4 text-[10px] font-bold text-stone-400 uppercase mt-2">
+                                            {chartPeriod === 'weekly' ? (
+                                                <>
+                                                    <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+                                                </>
+                                            ) : (
+                                                chartData.map(entry => <span key={entry.name}>{entry.name}</span>)
+                                            )}
+                                        </div>
+                                    </>
+                                ) : (
+                                    <div className="flex-1 flex items-center justify-center">
+                                        <div className="text-center text-stone-400">
+                                            <span className="material-symbols-outlined text-4xl mb-2">bar_chart</span>
+                                            <p className="text-sm">No chart data available</p>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         </div>
 
@@ -374,9 +468,10 @@ const Dashboard: React.FC = () => {
                                 <h3 className="text-lg font-bold text-stone-800">Top Students</h3>
                                 <button 
                                     onClick={() => setShowAddStudentModal(true)}
-                                    className="size-8 rounded-full bg-white flex items-center justify-center hover:bg-stone-50 transition-colors shadow-sm border border-stone-100"
+                                    aria-label="Add new student"
+                                    className="size-8 rounded-full bg-white flex items-center justify-center hover:bg-stone-50 transition-colors shadow-sm border border-stone-100 focus:ring-2 focus:ring-primary/50 focus:outline-none"
                                 >
-                                    <span className="material-symbols-outlined text-[16px]">add</span>
+                                    <span className="material-symbols-outlined text-[16px]" aria-hidden="true">add</span>
                                 </button>
                             </div>
                             <div className="overflow-y-auto px-4 pb-4 flex-1 space-y-3 custom-scrollbar">
@@ -413,9 +508,10 @@ const Dashboard: React.FC = () => {
                                                 newDate.setDate(currentDate.getDate() - 7);
                                                 setCurrentDate(newDate);
                                             }}
-                                            className="size-8 rounded-full border border-stone-200 flex items-center justify-center hover:bg-stone-50 text-stone-500"
+                                            aria-label="Previous week"
+                                            className="size-8 rounded-full border border-stone-200 flex items-center justify-center hover:bg-stone-50 text-stone-500 focus:ring-2 focus:ring-primary/50 focus:outline-none"
                                         >
-                                            <span className="material-symbols-outlined text-[16px]">chevron_left</span>
+                                            <span className="material-symbols-outlined text-[16px]" aria-hidden="true">chevron_left</span>
                                         </button>
                                         <button 
                                             onClick={() => {
@@ -423,17 +519,19 @@ const Dashboard: React.FC = () => {
                                                 newDate.setDate(currentDate.getDate() + 7);
                                                 setCurrentDate(newDate);
                                             }}
-                                            className="size-8 rounded-full border border-stone-200 flex items-center justify-center hover:bg-stone-50 text-stone-500"
+                                            aria-label="Next week"
+                                            className="size-8 rounded-full border border-stone-200 flex items-center justify-center hover:bg-stone-50 text-stone-500 focus:ring-2 focus:ring-primary/50 focus:outline-none"
                                         >
-                                            <span className="material-symbols-outlined text-[16px]">chevron_right</span>
+                                            <span className="material-symbols-outlined text-[16px]" aria-hidden="true">chevron_right</span>
                                         </button>
                                     </div>
                                 </div>
                                 <button 
                                     onClick={() => setShowAddSessionModal(true)}
-                                    className="px-4 py-1.5 rounded-full bg-accent text-white text-xs font-bold shadow-lg hover:bg-stone-800 flex items-center gap-1"
+                                    aria-label="Add new session"
+                                    className="px-4 py-1.5 rounded-full bg-accent text-white text-xs font-bold shadow-lg hover:bg-stone-800 flex items-center gap-1 focus:ring-2 focus:ring-primary/50 focus:outline-none"
                                 >
-                                    <span className="material-symbols-outlined text-[14px]">add</span> Add Session
+                                    <span className="material-symbols-outlined text-[14px]" aria-hidden="true">add</span> Add Session
                                 </button>
                             </div>
                             <div className="flex-1 overflow-hidden">
@@ -542,7 +640,11 @@ const Dashboard: React.FC = () => {
                                 <div className="flex justify-between items-start">
                                     <h3 className="text-lg font-bold text-stone-800">To-Do List</h3>
                                     <button 
-                                        onClick={() => createToast('Viewing all todos', 'info', setToasts)}
+                                        onClick={() => {
+                                            // Show all todos in a modal or scroll to show all
+                                            createToast(`Showing all ${todos.length} todos`, 'info', setToasts);
+                                            // Could navigate to a dedicated todos page if one exists
+                                        }}
                                         className="text-xs font-bold text-primary hover:text-primary-content transition-colors"
                                     >
                                         View All
@@ -582,7 +684,8 @@ const Dashboard: React.FC = () => {
                                     <p className="text-xs text-stone-400 mb-4">You've completed {sessionsThisMonth} {sessionsThisMonth === 1 ? 'session' : 'sessions'} this month.</p>
                                     <button 
                                         onClick={() => setShowBadgeModal(true)}
-                                        className="px-4 py-2 rounded-full bg-white text-stone-900 text-xs font-bold hover:bg-primary transition-colors"
+                                        aria-label="View badge details"
+                                        className="px-4 py-2 rounded-full bg-white text-stone-900 text-xs font-bold hover:bg-primary transition-colors focus:ring-2 focus:ring-primary/50 focus:outline-none"
                                     >
                                         View Badge
                                     </button>
@@ -606,10 +709,6 @@ const Dashboard: React.FC = () => {
                     <div>
                         <label className="block text-xs font-bold text-stone-700 uppercase tracking-wide mb-2">Full Name</label>
                         <input name="name" type="text" className="w-full rounded-xl border-stone-200 bg-stone-50 px-4 py-3 text-sm font-medium text-stone-800 focus:border-primary focus:ring-primary/20 transition-all" placeholder="e.g., John Doe" required />
-                    </div>
-                    <div>
-                        <label className="block text-xs font-bold text-stone-700 uppercase tracking-wide mb-2">Email</label>
-                        <input name="email" type="email" className="w-full rounded-xl border-stone-200 bg-stone-50 px-4 py-3 text-sm font-medium text-stone-800 focus:border-primary focus:ring-primary/20 transition-all" placeholder="john@example.com" required />
                     </div>
                     <div>
                         <label className="block text-xs font-bold text-stone-700 uppercase tracking-wide mb-2">Subject</label>

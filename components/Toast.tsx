@@ -37,9 +37,11 @@ const Toast: React.FC<ToastProps> = ({ message, type = 'info', duration = 3000, 
 
     return (
         <div
-            className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-2xl border shadow-lg flex items-center gap-3 transition-all duration-300 ${
+            className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-2xl border shadow-lg flex items-center gap-3 transition-all duration-300 lg:top-4 lg:right-4 top-20 right-4 ${
                 isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2'
             } ${typeStyles[type]}`}
+            role="alert"
+            aria-live="polite"
         >
             <span className="material-symbols-outlined text-[20px]">{icons[type]}</span>
             <span className="text-sm font-medium">{message}</span>
@@ -48,9 +50,10 @@ const Toast: React.FC<ToastProps> = ({ message, type = 'info', duration = 3000, 
                     setIsVisible(false);
                     setTimeout(onClose, 300);
                 }}
-                className="ml-2 hover:opacity-70 transition-opacity"
+                aria-label="Close notification"
+                className="ml-2 hover:opacity-70 transition-opacity focus:ring-2 focus:ring-primary/50 focus:outline-none rounded"
             >
-                <span className="material-symbols-outlined text-[18px]">close</span>
+                <span className="material-symbols-outlined text-[18px]" aria-hidden="true">close</span>
             </button>
         </div>
     );

@@ -70,10 +70,14 @@ const Lessons: React.FC = () => {
                     lessonDateTime: new Date(lessonDate),
                 });
             } else {
-                // Recurring item - generate instances for past 30 days and next 30 days
+                // Recurring item - generate instances for past 7 days and next 30 days (optimized)
                 // Use HK time to determine "today"
                 const hkNow = getHKNow();
-                for (let i = -30; i <= 30; i++) {
+                // Only generate past 7 days to reduce initial load, but show next 30 days
+                const pastDays = 7;
+                const futureDays = 30;
+                
+                for (let i = -pastDays; i <= futureDays; i++) {
                     const date = new Date(hkNow);
                     date.setDate(hkNow.getDate() + i);
                     const dayOfWeek = (date.getDay() + 6) % 7; // Convert Sunday=0 to Monday=0
@@ -260,9 +264,10 @@ const Lessons: React.FC = () => {
                     </div>
                     <button 
                         onClick={() => setShowAddLessonModal(true)}
-                        className="px-5 h-12 rounded-full bg-accent text-white font-medium flex items-center gap-2 hover:bg-stone-800 transition-colors shadow-lg shadow-stone-800/20"
+                        aria-label="Add new lesson"
+                        className="px-5 h-12 rounded-full bg-accent text-white font-medium flex items-center gap-2 hover:bg-stone-800 transition-colors shadow-lg shadow-stone-800/20 focus:ring-2 focus:ring-primary/50 focus:outline-none"
                     >
-                        <span className="material-symbols-outlined text-[20px]">add</span>
+                        <span className="material-symbols-outlined text-[20px]" aria-hidden="true">add</span>
                         <span>Add Lesson</span>
                     </button>
                 </div>
@@ -312,7 +317,9 @@ const Lessons: React.FC = () => {
                         <div className="flex gap-2">
                             <button 
                                 onClick={() => setFilter('all')}
-                                className={`px-4 py-2 rounded-full text-sm font-bold transition-colors ${
+                                aria-label="Show all lessons"
+                                aria-pressed={filter === 'all'}
+                                className={`px-4 py-2 rounded-full text-sm font-bold transition-colors focus:ring-2 focus:ring-primary/50 focus:outline-none ${
                                     filter === 'all' 
                                         ? 'bg-accent text-white shadow-sm' 
                                         : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
@@ -322,7 +329,9 @@ const Lessons: React.FC = () => {
                             </button>
                             <button 
                                 onClick={() => setFilter('past')}
-                                className={`px-4 py-2 rounded-full text-sm font-bold transition-colors ${
+                                aria-label="Show past lessons"
+                                aria-pressed={filter === 'past'}
+                                className={`px-4 py-2 rounded-full text-sm font-bold transition-colors focus:ring-2 focus:ring-primary/50 focus:outline-none ${
                                     filter === 'past' 
                                         ? 'bg-accent text-white shadow-sm' 
                                         : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
@@ -332,7 +341,9 @@ const Lessons: React.FC = () => {
                             </button>
                             <button 
                                 onClick={() => setFilter('future')}
-                                className={`px-4 py-2 rounded-full text-sm font-bold transition-colors ${
+                                aria-label="Show upcoming lessons"
+                                aria-pressed={filter === 'future'}
+                                className={`px-4 py-2 rounded-full text-sm font-bold transition-colors focus:ring-2 focus:ring-primary/50 focus:outline-none ${
                                     filter === 'future' 
                                         ? 'bg-accent text-white shadow-sm' 
                                         : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
@@ -432,14 +443,14 @@ const Lessons: React.FC = () => {
                                                                 e.stopPropagation();
                                                                 handleDeleteClick(lesson);
                                                             }}
-                                                            className={`opacity-0 group-hover:opacity-100 transition-opacity size-8 rounded-full flex items-center justify-center ${
+                                                            aria-label={`Delete session: ${lesson.title}`}
+                                                            className={`opacity-0 group-hover:opacity-100 transition-opacity size-8 rounded-full flex items-center justify-center focus:opacity-100 focus:ring-2 focus:ring-red-500/50 focus:outline-none ${
                                                                 lesson.color === 'accent' && !isPastLesson 
                                                                     ? 'bg-white/20 hover:bg-white/30 text-white' 
                                                                     : 'bg-stone-100 hover:bg-red-100 text-stone-600 hover:text-red-600'
                                                             }`}
-                                                            title="Delete session"
                                                         >
-                                                            <span className="material-symbols-outlined text-[18px]">delete</span>
+                                                            <span className="material-symbols-outlined text-[18px]" aria-hidden="true">delete</span>
                                                         </button>
                                                         {pricePerHour && (
                                                             <div className="text-right">

@@ -21,6 +21,7 @@ const Students: React.FC = () => {
     const [showDeleteModal, setShowDeleteModal] = useState<Student | null>(null);
     const [toasts, setToasts] = useState<Array<{ id: string; message: string; type?: 'success' | 'error' | 'info' | 'warning' }>>([]);
     const [newScheduleSlot, setNewScheduleSlot] = useState<Partial<WeeklyScheduleSlot>>({ day: 0, startTime: 9, duration: 1 });
+    const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
     const filteredStudents = useMemo(() => {
         return students.filter(student => {
@@ -43,11 +44,30 @@ const Students: React.FC = () => {
         const formData = new FormData(e.currentTarget);
         const name = formData.get('name') as string;
         const subject = formData.get('subject') as string;
-        const pricePerHour = formData.get('pricePerHour') ? parseFloat(formData.get('pricePerHour') as string) : undefined;
+        const pricePerHourStr = formData.get('pricePerHour') as string;
+        const pricePerHour = pricePerHourStr ? parseFloat(pricePerHourStr) : undefined;
+        
+        const errors: Record<string, string> = {};
+        if (!name || name.trim().length === 0) {
+            errors.name = 'Name is required';
+        }
+        if (!subject) {
+            errors.subject = 'Subject is required';
+        }
+        if (pricePerHour !== undefined && (isNaN(pricePerHour) || pricePerHour < 0)) {
+            errors.pricePerHour = 'Price must be a positive number';
+        }
+        
+        if (Object.keys(errors).length > 0) {
+            setFormErrors(errors);
+            return;
+        }
+        
+        setFormErrors({});
         const newStudent: Student = {
             id: Date.now().toString(),
             initials: getInitials(name),
-            name,
+            name: name.trim(),
             subject,
             progress: '',
             nextSession: 'Not scheduled',
@@ -71,9 +91,28 @@ const Students: React.FC = () => {
         const nextSession = formData.get('nextSession') as string;
         const progress = formData.get('progress') as string;
         const status = formData.get('status') as 'Active' | 'Paused' | 'Risk';
-        const pricePerHour = formData.get('pricePerHour') ? parseFloat(formData.get('pricePerHour') as string) : undefined;
+        const pricePerHourStr = formData.get('pricePerHour') as string;
+        const pricePerHour = pricePerHourStr ? parseFloat(pricePerHourStr) : undefined;
+        
+        const errors: Record<string, string> = {};
+        if (!name || name.trim().length === 0) {
+            errors.name = 'Name is required';
+        }
+        if (!subject) {
+            errors.subject = 'Subject is required';
+        }
+        if (pricePerHour !== undefined && (isNaN(pricePerHour) || pricePerHour < 0)) {
+            errors.pricePerHour = 'Price must be a positive number';
+        }
+        
+        if (Object.keys(errors).length > 0) {
+            setFormErrors(errors);
+            return;
+        }
+        
+        setFormErrors({});
         updateStudent(showEditModal.id, {
-            name,
+            name: name.trim(),
             subject,
             nextSession,
             progress,
@@ -117,6 +156,88 @@ const Students: React.FC = () => {
         updateStudent(showEditModal.id, { weeklySchedule: updatedSchedule });
     }, [showEditModal, updateStudent]);
 
+    // Helper function to get next session for a student
+    const getNextSession = useCallback((student: Student) => {
+        const now = new Date();
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        
+        // Find all future sessions for this student
+        const futureSessions = allScheduleItems
+            .filter(item => item.studentId === student.id)
+            .map(item => {
+                if (item.date) {
+                    // One-time session with specific date
+                    const sessionDate = new Date(item.date);
+                    const [hours, minutes] = [Math.floor(item.startTime), Math.round((item.startTime % 1) * 60)];
+                    sessionDate.setHours(hours, minutes, 0, 0);
+                    
+                    if (sessionDate >= now) {
+                        return {
+                            date: sessionDate,
+                            startTime: item.startTime,
+                            duration: item.duration
+                        };
+                    }
+                } else {
+                    // Recurring session - find next occurrence
+                    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                    const targetDay = item.day === 0 ? 0 : item.day === 6 ? 6 : item.day + 1; // Convert Monday=0 to Sunday=0
+                    
+                    const daysUntilNext = (targetDay - now.getDay() + 7) % 7 || 7;
+                    const nextDate = new Date(today);
+                    nextDate.setDate(today.getDate() + daysUntilNext);
+                    
+                    const [hours, minutes] = [Math.floor(item.startTime), Math.round((item.startTime % 1) * 60)];
+                    nextDate.setHours(hours, minutes, 0, 0);
+                    
+                    if (nextDate >= now) {
+                        return {
+                            date: nextDate,
+                            startTime: item.startTime,
+                            duration: item.duration
+                        };
+                    }
+                }
+                return null;
+            })
+            .filter((s): s is { date: Date; startTime: number; duration: number } => s !== null)
+            .sort((a, b) => a.date.getTime() - b.date.getTime());
+        
+        if (futureSessions.length === 0) {
+            return { text: student.nextSession || 'Not scheduled', time: null };
+        }
+        
+        const nextSession = futureSessions[0];
+        const formatTime = (hour: number, minute: number) => {
+            const period = hour >= 12 ? 'PM' : 'AM';
+            const displayHour = hour > 12 ? hour - 12 : (hour === 0 ? 12 : hour);
+            return `${displayHour}:${String(minute).padStart(2, '0')} ${period}`;
+        };
+        
+        const startHour = Math.floor(nextSession.startTime);
+        const startMinute = Math.round((nextSession.startTime % 1) * 60);
+        const endTime = nextSession.startTime + nextSession.duration;
+        const endHour = Math.floor(endTime);
+        const endMinute = Math.round((endTime % 1) * 60);
+        
+        const timeStr = `${formatTime(startHour, startMinute)} - ${formatTime(endHour, endMinute)}`;
+        
+        // Format date text
+        const daysDiff = Math.ceil((nextSession.date.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+        let dateText = '';
+        if (daysDiff === 0) {
+            dateText = 'Today';
+        } else if (daysDiff === 1) {
+            dateText = 'Tomorrow';
+        } else if (daysDiff <= 7) {
+            dateText = nextSession.date.toLocaleDateString('en-US', { weekday: 'long' });
+        } else {
+            dateText = nextSession.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        }
+        
+        return { text: dateText, time: timeStr };
+    }, [allScheduleItems]);
+
     // Sync edit modal with latest student data when students change
     useEffect(() => {
         if (showEditModal) {
@@ -151,10 +272,11 @@ const Students: React.FC = () => {
                     </div>
                     <button 
                         onClick={() => setShowAddModal(true)}
-                        className="px-5 h-12 rounded-full bg-accent text-white font-medium flex items-center gap-2 hover:bg-stone-800 transition-colors shadow-lg shadow-stone-800/20"
+                        aria-label="Add new student"
+                        className="px-5 h-12 rounded-full bg-accent text-white font-medium flex items-center gap-2 hover:bg-stone-800 transition-colors shadow-lg shadow-stone-800/20 focus:ring-2 focus:ring-primary/50 focus:outline-none"
                     >
-                        <span className="material-symbols-outlined text-[20px]">add</span>
-                        <span>New Student</span>
+                        <span className="material-symbols-outlined text-[20px]" aria-hidden="true">add</span>
+                        <span>Add Student</span>
                     </button>
                 </div>
             </header>
@@ -200,12 +322,26 @@ const Students: React.FC = () => {
                         </div>
                     </div>
 
+                    {/* Mobile Add Student Button */}
+                    <div className="lg:hidden">
+                        <button 
+                            onClick={() => setShowAddModal(true)}
+                            aria-label="Add new student"
+                            className="w-full px-5 h-12 rounded-full bg-accent text-white font-medium flex items-center justify-center gap-2 hover:bg-stone-800 transition-colors shadow-lg shadow-stone-800/20 focus:ring-2 focus:ring-primary/50 focus:outline-none"
+                        >
+                            <span className="material-symbols-outlined text-[20px]" aria-hidden="true">add</span>
+                            <span>Add Student</span>
+                        </button>
+                    </div>
+
                     <div className="bg-surface border border-white shadow-card rounded-[2rem] overflow-hidden flex flex-col h-[calc(100vh-340px)] min-h-[500px]">
                         <div className="p-6 border-b border-stone-100 flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between bg-surface-secondary">
                             <div className="flex gap-2 bg-stone-100 p-1 rounded-full">
                                 <button 
                                     onClick={() => setStatusFilter('all')}
-                                    className={`px-4 py-1.5 rounded-full text-xs font-bold transition-colors ${
+                                    aria-label="Show all students"
+                                    aria-pressed={statusFilter === 'all'}
+                                    className={`px-4 py-1.5 rounded-full text-xs font-bold transition-colors focus:ring-2 focus:ring-primary/50 focus:outline-none ${
                                         statusFilter === 'all' 
                                             ? 'bg-white text-stone-900 shadow-sm' 
                                             : 'text-stone-500 hover:text-stone-900'
@@ -215,7 +351,9 @@ const Students: React.FC = () => {
                                 </button>
                                 <button 
                                     onClick={() => setStatusFilter('Active')}
-                                    className={`px-4 py-1.5 rounded-full text-xs font-bold transition-colors ${
+                                    aria-label="Show active students"
+                                    aria-pressed={statusFilter === 'Active'}
+                                    className={`px-4 py-1.5 rounded-full text-xs font-bold transition-colors focus:ring-2 focus:ring-primary/50 focus:outline-none ${
                                         statusFilter === 'Active' 
                                             ? 'bg-white text-stone-900 shadow-sm' 
                                             : 'text-stone-500 hover:text-stone-900'
@@ -225,7 +363,9 @@ const Students: React.FC = () => {
                                 </button>
                                 <button 
                                     onClick={() => setStatusFilter('Paused')}
-                                    className={`px-4 py-1.5 rounded-full text-xs font-bold transition-colors ${
+                                    aria-label="Show paused students"
+                                    aria-pressed={statusFilter === 'Paused'}
+                                    className={`px-4 py-1.5 rounded-full text-xs font-bold transition-colors focus:ring-2 focus:ring-primary/50 focus:outline-none ${
                                         statusFilter === 'Paused' 
                                             ? 'bg-white text-stone-900 shadow-sm' 
                                             : 'text-stone-500 hover:text-stone-900'
@@ -262,7 +402,8 @@ const Students: React.FC = () => {
                         </div>
 
                         <div className="overflow-auto flex-1 p-4 bg-surface custom-scrollbar">
-                            <table className="w-full text-left border-separate border-spacing-y-2">
+                            <div className="overflow-x-auto -mx-4 px-4">
+                                <table className="w-full text-left border-separate border-spacing-y-2 min-w-[800px]">
                                 <thead className="text-[11px] font-bold text-stone-400 uppercase tracking-widest sticky top-0 bg-surface z-10">
                                     <tr>
                                         <th className="px-6 py-3 bg-surface">Student Info</th>
@@ -293,12 +434,26 @@ const Students: React.FC = () => {
                                                 </span>
                                             </td>
                                             <td className="px-6 py-4 border-y border-transparent bg-white group-hover:border-border">
+                                                <span className="text-xs font-bold text-stone-600">
+                                                    {student.pricePerHour ? `$${student.pricePerHour.toFixed(2)}/hr` : 'Not set'}
+                                                </span>
+                                            </td>
+                                            <td className="px-6 py-4 border-y border-transparent bg-white group-hover:border-border">
                                                 <span className="text-xs font-bold text-stone-600">{student.progress || 'Not set'}</span>
                                             </td>
                                              <td className="px-6 py-4 border-y border-transparent bg-white group-hover:border-border">
                                                 <div className="flex flex-col">
-                                                    <span className="text-stone-800 font-bold text-xs">{student.nextSession}</span>
-                                                    <span className="text-stone-400 text-[10px]">2:00 PM - 3:30 PM</span>
+                                                    {(() => {
+                                                        const nextSession = getNextSession(student);
+                                                        return (
+                                                            <>
+                                                                <span className="text-stone-800 font-bold text-xs">{nextSession.text}</span>
+                                                                {nextSession.time && (
+                                                                    <span className="text-stone-400 text-[10px]">{nextSession.time}</span>
+                                                                )}
+                                                            </>
+                                                        );
+                                                    })()}
                                                 </div>
                                             </td>
                                             <td className="px-6 py-4 border-y border-transparent bg-white group-hover:border-border text-center">
@@ -314,15 +469,17 @@ const Students: React.FC = () => {
                                                 <div className="flex justify-end gap-1 opacity-40 group-hover:opacity-100 transition-opacity">
                                                     <button 
                                                         onClick={() => setShowEditModal(student)}
-                                                        className="size-8 rounded-full hover:bg-stone-100 flex items-center justify-center text-stone-500 transition-colors"
+                                                        aria-label={`Edit ${student.name}`}
+                                                        className="size-8 rounded-full hover:bg-stone-100 flex items-center justify-center text-stone-500 transition-colors focus:ring-2 focus:ring-primary/50 focus:outline-none"
                                                     >
-                                                        <span className="material-symbols-outlined text-[18px]">edit</span>
+                                                        <span className="material-symbols-outlined text-[18px]" aria-hidden="true">edit</span>
                                                     </button>
                                                     <button 
                                                         onClick={() => setShowDeleteModal(student)}
-                                                        className="size-8 rounded-full hover:bg-red-50 hover:text-red-600 flex items-center justify-center text-stone-500 transition-colors"
+                                                        aria-label={`Delete ${student.name}`}
+                                                        className="size-8 rounded-full hover:bg-red-50 hover:text-red-600 flex items-center justify-center text-stone-500 transition-colors focus:ring-2 focus:ring-red-500/50 focus:outline-none"
                                                     >
-                                                        <span className="material-symbols-outlined text-[18px]">delete</span>
+                                                        <span className="material-symbols-outlined text-[18px]" aria-hidden="true">delete</span>
                                                     </button>
                                                 </div>
                                             </td>
@@ -342,34 +499,57 @@ const Students: React.FC = () => {
                                     )}
                                 </tbody>
                             </table>
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
 
             {/* Modals */}
-            <Modal isOpen={showAddModal} onClose={() => setShowAddModal(false)} title="Add New Student" size="md">
+            <Modal isOpen={showAddModal} onClose={() => { setShowAddModal(false); setFormErrors({}); }} title="Add New Student" size="md">
                 <form onSubmit={handleAddStudent} className="space-y-4">
                     <div>
                         <label className="block text-xs font-bold text-stone-700 uppercase tracking-wide mb-2">Full Name</label>
-                        <input name="name" type="text" className="w-full rounded-xl border-stone-200 bg-stone-50 px-4 py-3 text-sm font-medium text-stone-800 focus:border-primary focus:ring-primary/20 transition-all" placeholder="e.g., John Doe" required />
+                        <input 
+                            name="name" 
+                            type="text" 
+                            className={`w-full rounded-xl border-stone-200 bg-stone-50 px-4 py-3 text-sm font-medium text-stone-800 focus:border-primary focus:ring-2 focus:ring-primary/50 focus:outline-none transition-all ${
+                                formErrors.name ? 'border-red-300 bg-red-50' : ''
+                            }`}
+                            placeholder="e.g., John Doe" 
+                            required 
+                        />
+                        {formErrors.name && <p className="text-xs text-red-600 mt-1">{formErrors.name}</p>}
                     </div>
                     <div>
                         <label className="block text-xs font-bold text-stone-700 uppercase tracking-wide mb-2">Subject</label>
-                        <select name="subject" className="w-full rounded-xl border-stone-200 bg-stone-50 px-4 py-3 text-sm font-medium text-stone-800 focus:border-primary focus:ring-primary/20 transition-all" required>
+                        <select 
+                            name="subject" 
+                            className={`w-full rounded-xl border-stone-200 bg-stone-50 px-4 py-3 text-sm font-medium text-stone-800 focus:border-primary focus:ring-2 focus:ring-primary/50 focus:outline-none transition-all ${
+                                formErrors.subject ? 'border-red-300 bg-red-50' : ''
+                            }`}
+                            required
+                        >
                             <option value="">Select a subject</option>
                             {profile.subjects.map((subject) => (
                                 <option key={subject} value={subject}>{subject}</option>
                             ))}
                         </select>
-                    </div>
-                    <div>
-                        <label className="block text-xs font-bold text-stone-700 uppercase tracking-wide mb-2">Email (Optional)</label>
-                        <input name="email" type="email" className="w-full rounded-xl border-stone-200 bg-stone-50 px-4 py-3 text-sm font-medium text-stone-800 focus:border-primary focus:ring-primary/20 transition-all" placeholder="student@example.com" />
+                        {formErrors.subject && <p className="text-xs text-red-600 mt-1">{formErrors.subject}</p>}
                     </div>
                     <div>
                         <label className="block text-xs font-bold text-stone-700 uppercase tracking-wide mb-2">Price per Hour ($)</label>
-                        <input name="pricePerHour" type="number" min="0" step="0.01" className="w-full rounded-xl border-stone-200 bg-stone-50 px-4 py-3 text-sm font-medium text-stone-800 focus:border-primary focus:ring-primary/20 transition-all" placeholder="e.g., 65.00" />
+                        <input 
+                            name="pricePerHour" 
+                            type="number" 
+                            min="0" 
+                            step="0.01" 
+                            className={`w-full rounded-xl border-stone-200 bg-stone-50 px-4 py-3 text-sm font-medium text-stone-800 focus:border-primary focus:ring-2 focus:ring-primary/50 focus:outline-none transition-all ${
+                                formErrors.pricePerHour ? 'border-red-300 bg-red-50' : ''
+                            }`}
+                            placeholder="e.g., 65.00" 
+                        />
+                        {formErrors.pricePerHour && <p className="text-xs text-red-600 mt-1">{formErrors.pricePerHour}</p>}
                     </div>
                     <div className="flex gap-3 pt-4">
                         <button type="button" onClick={() => setShowAddModal(false)} className="flex-1 px-4 py-3 rounded-full border border-stone-200 text-stone-600 font-bold text-sm hover:bg-stone-50 transition-colors">
@@ -382,20 +562,37 @@ const Students: React.FC = () => {
                 </form>
             </Modal>
 
-            <Modal isOpen={showEditModal !== null} onClose={() => setShowEditModal(null)} title="Edit Student" size="md">
+            <Modal isOpen={showEditModal !== null} onClose={() => { setShowEditModal(null); setFormErrors({}); }} title="Edit Student" size="md">
                 {showEditModal && (
                     <form onSubmit={handleEditStudent} className="space-y-4">
                         <div>
                             <label className="block text-xs font-bold text-stone-700 uppercase tracking-wide mb-2">Full Name</label>
-                            <input name="name" type="text" defaultValue={showEditModal.name} className="w-full rounded-xl border-stone-200 bg-stone-50 px-4 py-3 text-sm font-medium text-stone-800 focus:border-primary focus:ring-primary/20 transition-all" required />
+                            <input 
+                                name="name" 
+                                type="text" 
+                                defaultValue={showEditModal.name} 
+                                className={`w-full rounded-xl border-stone-200 bg-stone-50 px-4 py-3 text-sm font-medium text-stone-800 focus:border-primary focus:ring-primary/20 transition-all ${
+                                    formErrors.name ? 'border-red-300 bg-red-50' : ''
+                                }`}
+                                required 
+                            />
+                            {formErrors.name && <p className="text-xs text-red-600 mt-1">{formErrors.name}</p>}
                         </div>
                         <div>
                             <label className="block text-xs font-bold text-stone-700 uppercase tracking-wide mb-2">Subject</label>
-                            <select name="subject" defaultValue={showEditModal.subject} className="w-full rounded-xl border-stone-200 bg-stone-50 px-4 py-3 text-sm font-medium text-stone-800 focus:border-primary focus:ring-primary/20 transition-all" required>
+                            <select 
+                                name="subject" 
+                                defaultValue={showEditModal.subject} 
+                                className={`w-full rounded-xl border-stone-200 bg-stone-50 px-4 py-3 text-sm font-medium text-stone-800 focus:border-primary focus:ring-2 focus:ring-primary/50 focus:outline-none transition-all ${
+                                    formErrors.subject ? 'border-red-300 bg-red-50' : ''
+                                }`}
+                                required
+                            >
                                 {profile.subjects.map((subject) => (
                                     <option key={subject} value={subject}>{subject}</option>
                                 ))}
                             </select>
+                            {formErrors.subject && <p className="text-xs text-red-600 mt-1">{formErrors.subject}</p>}
                         </div>
                         <div>
                             <label className="block text-xs font-bold text-stone-700 uppercase tracking-wide mb-2">Price per Hour ($)</label>
@@ -405,9 +602,12 @@ const Students: React.FC = () => {
                                 min="0" 
                                 step="0.01" 
                                 defaultValue={showEditModal.pricePerHour || ''} 
-                                className="w-full rounded-xl border-stone-200 bg-stone-50 px-4 py-3 text-sm font-medium text-stone-800 focus:border-primary focus:ring-primary/20 transition-all" 
+                                className={`w-full rounded-xl border-stone-200 bg-stone-50 px-4 py-3 text-sm font-medium text-stone-800 focus:border-primary focus:ring-2 focus:ring-primary/50 focus:outline-none transition-all ${
+                                    formErrors.pricePerHour ? 'border-red-300 bg-red-50' : ''
+                                }`}
                                 placeholder="e.g., 65.00" 
                             />
+                            {formErrors.pricePerHour && <p className="text-xs text-red-600 mt-1">{formErrors.pricePerHour}</p>}
                         </div>
                         <div>
                             <label className="block text-xs font-bold text-stone-700 uppercase tracking-wide mb-2">Progress</label>
@@ -415,7 +615,7 @@ const Students: React.FC = () => {
                                 name="progress" 
                                 type="text" 
                                 defaultValue={showEditModal.progress} 
-                                className="w-full rounded-xl border-stone-200 bg-stone-50 px-4 py-3 text-sm font-medium text-stone-800 focus:border-primary focus:ring-primary/20 transition-all" 
+                                className="w-full rounded-xl border-stone-200 bg-stone-50 px-4 py-3 text-sm font-medium text-stone-800 focus:border-primary focus:ring-2 focus:ring-primary/50 focus:outline-none transition-all" 
                                 placeholder="e.g., Excellent, Good, Needs Improvement, Not started"
                             />
                         </div>
@@ -425,7 +625,7 @@ const Students: React.FC = () => {
                                 name="nextSession" 
                                 type="text" 
                                 defaultValue={showEditModal.nextSession} 
-                                className="w-full rounded-xl border-stone-200 bg-stone-50 px-4 py-3 text-sm font-medium text-stone-800 focus:border-primary focus:ring-primary/20 transition-all" 
+                                className="w-full rounded-xl border-stone-200 bg-stone-50 px-4 py-3 text-sm font-medium text-stone-800 focus:border-primary focus:ring-2 focus:ring-primary/50 focus:outline-none transition-all" 
                                 placeholder="e.g., Tomorrow, Friday, Sep 20, Not scheduled"
                             />
                         </div>
@@ -434,7 +634,7 @@ const Students: React.FC = () => {
                             <select 
                                 name="status" 
                                 defaultValue={showEditModal.status} 
-                                className="w-full rounded-xl border-stone-200 bg-stone-50 px-4 py-3 text-sm font-medium text-stone-800 focus:border-primary focus:ring-primary/20 transition-all" 
+                                className="w-full rounded-xl border-stone-200 bg-stone-50 px-4 py-3 text-sm font-medium text-stone-800 focus:border-primary focus:ring-2 focus:ring-primary/50 focus:outline-none transition-all" 
                                 required
                             >
                                 <option value="Active">Active</option>
@@ -467,9 +667,10 @@ const Students: React.FC = () => {
                                             <button
                                                 type="button"
                                                 onClick={() => handleRemoveScheduleSlot(index)}
-                                                className="text-red-600 hover:text-red-700 transition-colors"
+                                                aria-label={`Remove schedule slot for ${dayNames[slot.day]}`}
+                                                className="text-red-600 hover:text-red-700 transition-colors focus:ring-2 focus:ring-red-500/50 focus:outline-none rounded"
                                             >
-                                                <span className="material-symbols-outlined text-[18px]">delete</span>
+                                                <span className="material-symbols-outlined text-[18px]" aria-hidden="true">delete</span>
                                             </button>
                                         </div>
                                     );
@@ -521,7 +722,8 @@ const Students: React.FC = () => {
                                     <button
                                         type="button"
                                         onClick={handleAddScheduleSlot}
-                                        className="px-3 py-2 rounded-xl bg-accent text-white text-sm font-bold hover:bg-stone-800 transition-colors"
+                                        aria-label="Add schedule slot"
+                                        className="px-3 py-2 rounded-xl bg-accent text-white text-sm font-bold hover:bg-stone-800 transition-colors focus:ring-2 focus:ring-primary/50 focus:outline-none"
                                     >
                                         Add
                                     </button>

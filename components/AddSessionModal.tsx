@@ -28,6 +28,7 @@ const AddSessionModal: React.FC<AddSessionModalProps> = ({
     const [date, setDate] = useState('');
     const [time, setTime] = useState('');
     const [duration, setDuration] = useState(60);
+    const [errors, setErrors] = useState<Record<string, string>>({});
 
     const selectedStudent = useMemo(() => {
         return students.find(s => s.id === selectedStudentId);
@@ -41,9 +42,41 @@ const AddSessionModal: React.FC<AddSessionModalProps> = ({
         );
     }, [students, searchTerm]);
 
+    const validateForm = (): boolean => {
+        const newErrors: Record<string, string> = {};
+        
+        if (!selectedStudentId) {
+            newErrors.student = 'Please select a student';
+        }
+        
+        if (!date) {
+            newErrors.date = 'Please select a date';
+        } else {
+            const selectedDate = new Date(date);
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            if (selectedDate < today) {
+                newErrors.date = 'Date cannot be in the past';
+            }
+        }
+        
+        if (!time) {
+            newErrors.time = 'Please select a time';
+        }
+        
+        if (!duration || duration <= 0) {
+            newErrors.duration = 'Duration must be greater than 0';
+        } else if (duration < 30) {
+            newErrors.duration = 'Duration must be at least 30 minutes';
+        }
+        
+        setErrors(newErrors);
+        return Object.keys(newErrors).length === 0;
+    };
+
     const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
-        if (!selectedStudent) return;
+        if (!validateForm() || !selectedStudent) return;
         
         onSubmit({
             studentId: selectedStudentId,
@@ -59,6 +92,7 @@ const AddSessionModal: React.FC<AddSessionModalProps> = ({
         setTime('');
         setDuration(60);
         setSearchTerm('');
+        setErrors({});
         onClose();
     };
 
@@ -68,6 +102,7 @@ const AddSessionModal: React.FC<AddSessionModalProps> = ({
         setTime('');
         setDuration(60);
         setSearchTerm('');
+        setErrors({});
         onClose();
     };
 
@@ -86,7 +121,7 @@ const AddSessionModal: React.FC<AddSessionModalProps> = ({
                             placeholder="Search students..."
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
-                            className="w-full pl-10 pr-4 py-2 rounded-xl border border-stone-200 bg-stone-50 text-sm font-medium text-stone-800 focus:border-primary focus:ring-primary/20 transition-all"
+                            className="w-full pl-10 pr-4 py-2 rounded-xl border border-stone-200 bg-stone-50 text-sm font-medium text-stone-800 focus:border-primary focus:ring-2 focus:ring-primary/50 focus:outline-none transition-all"
                         />
                     </div>
                     <div className="max-h-64 overflow-y-auto rounded-xl border border-stone-200 bg-white custom-scrollbar">
@@ -171,20 +206,32 @@ const AddSessionModal: React.FC<AddSessionModalProps> = ({
                         <input
                             type="date"
                             value={date}
-                            onChange={(e) => setDate(e.target.value)}
-                            className="w-full rounded-xl border-stone-200 bg-stone-50 px-4 py-3 text-sm font-medium text-stone-800 focus:border-primary focus:ring-primary/20 transition-all"
+                            onChange={(e) => {
+                                setDate(e.target.value);
+                                if (errors.date) setErrors(prev => ({ ...prev, date: '' }));
+                            }}
+                            className={`w-full rounded-xl border-stone-200 bg-stone-50 px-4 py-3 text-sm font-medium text-stone-800 focus:border-primary focus:ring-2 focus:ring-primary/50 focus:outline-none transition-all ${
+                                errors.date ? 'border-red-300 bg-red-50' : ''
+                            }`}
                             required
                         />
+                        {errors.date && <p className="text-xs text-red-600 mt-1">{errors.date}</p>}
                     </div>
                     <div>
                         <label className="block text-xs font-bold text-stone-700 uppercase tracking-wide mb-2">Time</label>
                         <input
                             type="time"
                             value={time}
-                            onChange={(e) => setTime(e.target.value)}
-                            className="w-full rounded-xl border-stone-200 bg-stone-50 px-4 py-3 text-sm font-medium text-stone-800 focus:border-primary focus:ring-primary/20 transition-all"
+                            onChange={(e) => {
+                                setTime(e.target.value);
+                                if (errors.time) setErrors(prev => ({ ...prev, time: '' }));
+                            }}
+                            className={`w-full rounded-xl border-stone-200 bg-stone-50 px-4 py-3 text-sm font-medium text-stone-800 focus:border-primary focus:ring-2 focus:ring-primary/50 focus:outline-none transition-all ${
+                                errors.time ? 'border-red-300 bg-red-50' : ''
+                            }`}
                             required
                         />
+                        {errors.time && <p className="text-xs text-red-600 mt-1">{errors.time}</p>}
                     </div>
                 </div>
 
@@ -196,10 +243,17 @@ const AddSessionModal: React.FC<AddSessionModalProps> = ({
                         min="30"
                         step="30"
                         value={duration}
-                        onChange={(e) => setDuration(parseInt(e.target.value) || 60)}
-                        className="w-full rounded-xl border-stone-200 bg-stone-50 px-4 py-3 text-sm font-medium text-stone-800 focus:border-primary focus:ring-primary/20 transition-all"
+                        onChange={(e) => {
+                            const value = parseInt(e.target.value) || 0;
+                            setDuration(value);
+                            if (errors.duration) setErrors(prev => ({ ...prev, duration: '' }));
+                        }}
+                        className={`w-full rounded-xl border-stone-200 bg-stone-50 px-4 py-3 text-sm font-medium text-stone-800 focus:border-primary focus:ring-2 focus:ring-primary/50 focus:outline-none transition-all ${
+                            errors.duration ? 'border-red-300 bg-red-50' : ''
+                        }`}
                         required
                     />
+                    {errors.duration && <p className="text-xs text-red-600 mt-1">{errors.duration}</p>}
                 </div>
 
                 {/* Submit Buttons */}

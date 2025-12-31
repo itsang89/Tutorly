@@ -12,7 +12,6 @@ const Schedule: React.FC = () => {
     const { currentDate, setCurrentDate, allScheduleItems, addScheduleItem, removeScheduleItem } = useSchedule();
     const { removeTransactionsByScheduleItemId } = useEarnings();
     const { students } = useStudents();
-    const [searchTerm, setSearchTerm] = useState('');
     const [viewType, setViewType] = useState<ViewType>('week');
     const [currentMonth, setCurrentMonth] = useState(new Date());
     const [showNewEventModal, setShowNewEventModal] = useState(false);
@@ -181,18 +180,87 @@ const Schedule: React.FC = () => {
         });
     }, [getWeekDates]);
 
-    // Calculate sessions this week
-    const sessionsThisWeek = useMemo(() => {
+    // Filter schedule items to only show those that belong to the current week
+    // Also map one-time events to the correct day based on their actual date
+    const filteredScheduleItems = useMemo(() => {
+        if (!allScheduleItems || !Array.isArray(allScheduleItems)) {
+            return [];
+        }
+        
         const { start, end } = getWeekDates();
-        // Count all schedule items (they're displayed weekly, so all items count)
-        return allScheduleItems.length;
+        const weekEnd = new Date(end);
+        weekEnd.setHours(23, 59, 59, 999);
+        
+        return allScheduleItems
+            .filter(item => {
+                // Recurring items (no date property or id starts with 'recurring-') always show
+                if (!item.date || item.id.startsWith('recurring-')) {
+                    return true;
+                }
+                
+                // For one-time items with a date, only show if the date falls within the current week
+                const itemDate = new Date(item.date);
+                itemDate.setHours(0, 0, 0, 0);
+                const weekStart = new Date(start);
+                weekStart.setHours(0, 0, 0, 0);
+                const weekEndDate = new Date(weekEnd);
+                weekEndDate.setHours(23, 59, 59, 999);
+                
+                return itemDate >= weekStart && itemDate <= weekEndDate;
+            })
+            .map(item => {
+                // For one-time items with a date, recalculate the day based on the actual date
+                // to ensure they appear on the correct day of the week
+                if (item.date && !item.id.startsWith('recurring-')) {
+                    const itemDate = new Date(item.date);
+                    const dayOfWeek = (itemDate.getDay() + 6) % 7; // Convert Sunday=0 to Monday=0
+                    return { ...item, day: dayOfWeek };
+                }
+                return item;
+            });
     }, [allScheduleItems, getWeekDates]);
 
-    // Calculate total hours
+    // Calculate sessions this week (only items in current week date range)
+    const sessionsThisWeek = useMemo(() => {
+        return filteredScheduleItems.length;
+    }, [filteredScheduleItems]);
+
+    // Calculate total hours for current week
     const totalHours = useMemo(() => {
-        const total = allScheduleItems.reduce((sum, item) => sum + item.duration, 0);
+        const total = filteredScheduleItems.reduce((sum, item) => sum + item.duration, 0);
         return Math.round(total * 10) / 10; // Round to 1 decimal place
-    }, [allScheduleItems]);
+    }, [filteredScheduleItems]);
+
+    // Calculate hours change from last week
+    const hoursChangeFromLastWeek = useMemo(() => {
+        const { start } = getWeekDates();
+        const lastWeekStart = new Date(start);
+        lastWeekStart.setDate(start.getDate() - 7);
+        const lastWeekEnd = new Date(lastWeekStart);
+        lastWeekEnd.setDate(lastWeekStart.getDate() + 6);
+        lastWeekEnd.setHours(23, 59, 59, 999);
+        
+        const lastWeekItems = allScheduleItems.filter(item => {
+            if (!item.date || item.id.startsWith('recurring-')) {
+                // Recurring items always count, but we need to check if they fall in last week
+                // For simplicity, recurring items are counted in both weeks
+                return true;
+            }
+            
+            const itemDate = new Date(item.date);
+            itemDate.setHours(0, 0, 0, 0);
+            const weekStart = new Date(lastWeekStart);
+            weekStart.setHours(0, 0, 0, 0);
+            const weekEndDate = new Date(lastWeekEnd);
+            weekEndDate.setHours(23, 59, 59, 999);
+            
+            return itemDate >= weekStart && itemDate <= weekEndDate;
+        });
+        
+        const lastWeekHours = lastWeekItems.reduce((sum, item) => sum + item.duration, 0);
+        const change = totalHours - lastWeekHours;
+        return Math.round(change * 10) / 10;
+    }, [filteredScheduleItems, allScheduleItems, totalHours, getWeekDates]);
 
     const getWeekNumber = useCallback(() => {
         const d = new Date(currentDate);
@@ -288,42 +356,6 @@ const Schedule: React.FC = () => {
         return today >= start && today <= end;
     }, [currentTime, getWeekDates]);
 
-    // Filter schedule items to only show those that belong to the current week
-    // Also map one-time events to the correct day based on their actual date
-    const filteredScheduleItems = useMemo(() => {
-        const { start, end } = getWeekDates();
-        const weekEnd = new Date(end);
-        weekEnd.setHours(23, 59, 59, 999);
-        
-        return allScheduleItems
-            .filter(item => {
-                // Recurring items (no date property or id starts with 'recurring-') always show
-                if (!item.date || item.id.startsWith('recurring-')) {
-                    return true;
-                }
-                
-                // For one-time items with a date, only show if the date falls within the current week
-                const itemDate = new Date(item.date);
-                itemDate.setHours(0, 0, 0, 0);
-                const weekStart = new Date(start);
-                weekStart.setHours(0, 0, 0, 0);
-                const weekEndDate = new Date(weekEnd);
-                weekEndDate.setHours(23, 59, 59, 999);
-                
-                return itemDate >= weekStart && itemDate <= weekEndDate;
-            })
-            .map(item => {
-                // For one-time items with a date, recalculate the day based on the actual date
-                // to ensure they appear on the correct day of the week
-                if (item.date && !item.id.startsWith('recurring-')) {
-                    const itemDate = new Date(item.date);
-                    const dayOfWeek = (itemDate.getDay() + 6) % 7; // Convert Sunday=0 to Monday=0
-                    return { ...item, day: dayOfWeek };
-                }
-                return item;
-            });
-    }, [allScheduleItems, getWeekDates]);
-
     // Update current time every minute
     useEffect(() => {
         const interval = setInterval(() => {
@@ -362,21 +394,12 @@ const Schedule: React.FC = () => {
                     </div>
                 </div>
                 <div className="flex items-center gap-4">
-                    <div className="flex items-center bg-surface border border-white shadow-sm rounded-full px-5 h-12 w-64 focus-within:ring-2 focus-within:ring-primary/50 transition-all">
-                        <span className="material-symbols-outlined text-stone-400 text-[20px]">search</span>
-                        <input 
-                            className="bg-transparent border-none text-sm text-stone-800 placeholder-stone-400 focus:ring-0 w-full h-full ml-2" 
-                            placeholder="Search sessions..." 
-                            type="text"
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                        />
-                    </div>
                      <button 
                         onClick={() => setShowNewEventModal(true)}
-                        className="px-5 h-12 rounded-full bg-accent text-white font-medium flex items-center gap-2 hover:bg-stone-800 transition-colors shadow-lg shadow-stone-800/20"
+                        aria-label="Create new event"
+                        className="px-5 h-12 rounded-full bg-accent text-white font-medium flex items-center gap-2 hover:bg-stone-800 transition-colors shadow-lg shadow-stone-800/20 focus:ring-2 focus:ring-primary/50 focus:outline-none"
                     >
-                        <span className="material-symbols-outlined text-[20px]">add</span>
+                        <span className="material-symbols-outlined text-[20px]" aria-hidden="true">add</span>
                         <span>New Event</span>
                     </button>
                 </div>
@@ -384,6 +407,18 @@ const Schedule: React.FC = () => {
 
             <div className="flex-1 overflow-y-auto px-4 lg:px-10 pb-10">
                 <div className="max-w-[1600px] mx-auto h-full flex flex-col">
+                    {/* Mobile New Event Button */}
+                    <div className="lg:hidden mb-6">
+                        <button 
+                            onClick={() => setShowNewEventModal(true)}
+                            aria-label="Create new event"
+                            className="w-full px-5 h-12 rounded-full bg-accent text-white font-medium flex items-center justify-center gap-2 hover:bg-stone-800 transition-colors shadow-lg shadow-stone-800/20 focus:ring-2 focus:ring-primary/50 focus:outline-none"
+                        >
+                            <span className="material-symbols-outlined text-[20px]" aria-hidden="true">add</span>
+                            <span>New Event</span>
+                        </button>
+                    </div>
+
                     <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 h-full min-h-[600px]">
                         <div className="xl:col-span-9 flex flex-col gap-6">
                             {/* Controls */}
@@ -398,7 +433,9 @@ const Schedule: React.FC = () => {
                                     <div className="flex items-center gap-2 bg-stone-100 rounded-full p-1">
                                         <button 
                                             onClick={() => setViewType('week')}
-                                            className={`px-4 py-2 rounded-full text-sm font-bold transition-colors ${
+                                            aria-label="Week view"
+                                            aria-pressed={viewType === 'week'}
+                                            className={`px-4 py-2 rounded-full text-sm font-bold transition-colors focus:ring-2 focus:ring-primary/50 focus:outline-none ${
                                                 viewType === 'week' 
                                                     ? 'bg-white text-stone-900 shadow-sm' 
                                                     : 'text-stone-500 hover:text-stone-900'
@@ -408,7 +445,9 @@ const Schedule: React.FC = () => {
                                         </button>
                                         <button 
                                             onClick={() => setViewType('month')}
-                                            className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
+                                            aria-label="Month view"
+                                            aria-pressed={viewType === 'month'}
+                                            className={`px-4 py-2 rounded-full text-sm font-medium transition-colors focus:ring-2 focus:ring-primary/50 focus:outline-none ${
                                                 viewType === 'month' 
                                                     ? 'bg-white text-stone-900 shadow-sm' 
                                                     : 'text-stone-500 hover:text-stone-900'
@@ -418,7 +457,9 @@ const Schedule: React.FC = () => {
                                         </button>
                                         <button 
                                             onClick={() => setViewType('day')}
-                                            className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
+                                            aria-label="Day view"
+                                            aria-pressed={viewType === 'day'}
+                                            className={`px-4 py-2 rounded-full text-sm font-medium transition-colors focus:ring-2 focus:ring-primary/50 focus:outline-none ${
                                                 viewType === 'day' 
                                                     ? 'bg-white text-stone-900 shadow-sm' 
                                                     : 'text-stone-500 hover:text-stone-900'
@@ -430,15 +471,17 @@ const Schedule: React.FC = () => {
                                     <div className="flex gap-2">
                                         <button 
                                             onClick={() => handleNavigateWeek('prev')}
-                                            className="size-10 rounded-full border border-stone-200 flex items-center justify-center hover:bg-stone-50 text-stone-600 transition-colors"
+                                            aria-label="Previous week"
+                                            className="size-10 rounded-full border border-stone-200 flex items-center justify-center hover:bg-stone-50 text-stone-600 transition-colors focus:ring-2 focus:ring-primary/50 focus:outline-none"
                                         >
-                                            <span className="material-symbols-outlined">chevron_left</span>
+                                            <span className="material-symbols-outlined" aria-hidden="true">chevron_left</span>
                                         </button>
                                         <button 
                                             onClick={() => handleNavigateWeek('next')}
-                                            className="size-10 rounded-full border border-stone-200 flex items-center justify-center hover:bg-stone-50 text-stone-600 transition-colors"
+                                            aria-label="Next week"
+                                            className="size-10 rounded-full border border-stone-200 flex items-center justify-center hover:bg-stone-50 text-stone-600 transition-colors focus:ring-2 focus:ring-primary/50 focus:outline-none"
                                         >
-                                            <span className="material-symbols-outlined">chevron_right</span>
+                                            <span className="material-symbols-outlined" aria-hidden="true">chevron_right</span>
                                         </button>
                                     </div>
                                 </div>
@@ -450,7 +493,11 @@ const Schedule: React.FC = () => {
                                             <span className="text-xs font-bold uppercase tracking-wider">Total Hours</span>
                                         </div>
                                         <span className="text-4xl font-display font-bold text-primary-content">{totalHours}h</span>
-                                        <span className="text-xs font-medium text-primary-content/80 mt-1">+0h from last week</span>
+                                        <span className={`text-xs font-medium mt-1 ${
+                                            hoursChangeFromLastWeek >= 0 ? 'text-primary-content/80' : 'text-red-300'
+                                        }`}>
+                                            {hoursChangeFromLastWeek >= 0 ? '+' : ''}{hoursChangeFromLastWeek}h from last week
+                                        </span>
                                     </div>
                                 </div>
                             </div>
@@ -479,7 +526,8 @@ const Schedule: React.FC = () => {
                                 </div>
                                 {/* Body */}
                                 <div className="flex-1 overflow-hidden relative">
-                                    <div className="grid grid-cols-[70px_1fr] h-[800px]">
+                                    <div className="overflow-x-auto overflow-y-hidden h-full">
+                                        <div className="grid grid-cols-[70px_1fr] h-[800px] min-w-[800px]">
                                         <div className="relative py-3 text-xs font-medium text-stone-400 text-right border-r border-stone-100 bg-stone-50/30 h-full overflow-hidden">
                                             {[6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23].map((hour, i) => {
                                                 // Position labels at correct hours (6 AM to 11 PM)
@@ -677,6 +725,7 @@ const Schedule: React.FC = () => {
                                             })()}
                                         </div>
                                     </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -691,15 +740,17 @@ const Schedule: React.FC = () => {
                                     <div className="flex gap-1">
                                         <button 
                                             onClick={() => handleNavigateMonth('prev')}
-                                            className="size-6 flex items-center justify-center hover:bg-stone-100 rounded-full text-stone-500"
+                                            aria-label="Previous month"
+                                            className="size-6 flex items-center justify-center hover:bg-stone-100 rounded-full text-stone-500 focus:ring-2 focus:ring-primary/50 focus:outline-none"
                                         >
-                                            <span className="material-symbols-outlined text-[16px]">chevron_left</span>
+                                            <span className="material-symbols-outlined text-[16px]" aria-hidden="true">chevron_left</span>
                                         </button>
                                         <button 
                                             onClick={() => handleNavigateMonth('next')}
-                                            className="size-6 flex items-center justify-center hover:bg-stone-100 rounded-full text-stone-500"
+                                            aria-label="Next month"
+                                            className="size-6 flex items-center justify-center hover:bg-stone-100 rounded-full text-stone-500 focus:ring-2 focus:ring-primary/50 focus:outline-none"
                                         >
-                                            <span className="material-symbols-outlined text-[16px]">chevron_right</span>
+                                            <span className="material-symbols-outlined text-[16px]" aria-hidden="true">chevron_right</span>
                                         </button>
                                     </div>
                                 </div>

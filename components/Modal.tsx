@@ -40,20 +40,22 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, size = 
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 safe-area-inset">
             <div 
                 className="absolute inset-0 bg-black/50 backdrop-blur-sm transition-opacity"
                 onClick={onClose}
+                aria-hidden="true"
             />
-            <div className={`relative bg-surface rounded-3xl shadow-xl border border-white w-full ${sizeClasses[size]} max-h-[90vh] overflow-hidden flex flex-col z-10`}>
+            <div className={`relative bg-surface rounded-3xl shadow-xl border border-white w-full ${sizeClasses[size]} max-h-[calc(100vh-2rem)] sm:max-h-[90vh] overflow-hidden flex flex-col z-10`}>
                 {title && (
                     <div className="flex items-center justify-between p-6 border-b border-stone-100">
                         <h2 className="text-xl font-bold text-stone-900">{title}</h2>
                         <button
                             onClick={onClose}
-                            className="size-8 rounded-full hover:bg-stone-100 flex items-center justify-center text-stone-500 hover:text-stone-900 transition-colors"
+                            aria-label="Close modal"
+                            className="size-8 rounded-full hover:bg-stone-100 flex items-center justify-center text-stone-500 hover:text-stone-900 transition-colors focus:ring-2 focus:ring-primary/50 focus:outline-none"
                         >
-                            <span className="material-symbols-outlined text-[20px]">close</span>
+                            <span className="material-symbols-outlined text-[20px]" aria-hidden="true">close</span>
                         </button>
                     </div>
                 )}

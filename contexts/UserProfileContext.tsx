@@ -3,7 +3,6 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 export interface UserProfile {
     firstName: string;
     lastName: string;
-    email: string;
     phone: string;
     bio: string;
     title: string; // e.g., "Math & Physics Expert"
@@ -20,7 +19,6 @@ interface UserProfileContextType {
 const defaultProfile: UserProfile = {
     firstName: 'Alex',
     lastName: 'Taylor',
-    email: 'alex.taylor@tutorly.com',
     phone: '+1 (555) 000-0000',
     bio: 'Senior math and physics tutor with over 5 years of experience helping high school and college students excel in their studies.',
     title: 'Math & Physics Expert',

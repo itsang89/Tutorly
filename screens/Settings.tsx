@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Modal from '../components/Modal';
 import { ToastContainer, createToast } from '../components/Toast';
 import { useUserProfile } from '../contexts/UserProfileContext';
@@ -7,6 +8,7 @@ type SettingsSection = 'profile' | 'notifications' | 'security';
 
 
 const Settings: React.FC = () => {
+    const navigate = useNavigate();
     const { profile, updateProfile, addSubject, removeSubject } = useUserProfile();
     const [activeSection, setActiveSection] = useState<SettingsSection>('profile');
     const [newSubject, setNewSubject] = useState('');
@@ -16,10 +18,12 @@ const Settings: React.FC = () => {
     const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
     const [showTwoFactorModal, setShowTwoFactorModal] = useState(false);
     const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
+    const [showRemoveAllDataModal, setShowRemoveAllDataModal] = useState(false);
     const [emailNotifications, setEmailNotifications] = useState(true);
     const [pushNotifications, setPushNotifications] = useState(true);
     const [smsNotifications, setSmsNotifications] = useState(false);
     const [toasts, setToasts] = useState<Array<{ id: string; message: string; type?: 'success' | 'error' | 'info' | 'warning' }>>([]);
+    const [notificationsRead, setNotificationsRead] = useState(false);
 
     const handleSaveProfile = useCallback((e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
@@ -27,7 +31,6 @@ const Settings: React.FC = () => {
         updateProfile({
             firstName: (formData.get('first-name') as string) || profile.firstName,
             lastName: (formData.get('last-name') as string) || profile.lastName,
-            email: (formData.get('email') as string) || profile.email,
             phone: (formData.get('phone') as string) || profile.phone,
             bio: (formData.get('bio') as string) || profile.bio,
             title: (formData.get('title') as string) || profile.title,
@@ -43,8 +46,33 @@ const Settings: React.FC = () => {
 
 
     const handleDeleteAccount = useCallback(() => {
-        createToast('Account deletion requested. Please check your email.', 'info', setToasts);
+        createToast('Account deletion requested.', 'info', setToasts);
         setShowDeleteAccountModal(false);
+    }, []);
+
+    const handleLogout = useCallback(() => {
+        createToast('Logged out successfully', 'success', setToasts);
+        setTimeout(() => {
+            navigate('/');
+        }, 500);
+    }, [navigate]);
+
+    const handleRemoveAllData = useCallback(() => {
+        // Clear all localStorage items starting with 'tutorly_'
+        const keysToRemove: string[] = [];
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith('tutorly_')) {
+                keysToRemove.push(key);
+            }
+        }
+        keysToRemove.forEach(key => localStorage.removeItem(key));
+        
+        createToast('All data removed successfully. Reloading...', 'success', setToasts);
+        setShowRemoveAllDataModal(false);
+        setTimeout(() => {
+            window.location.reload();
+        }, 1000);
     }, []);
 
     const removeToast = useCallback((id: string) => {
@@ -87,14 +115,30 @@ const Settings: React.FC = () => {
                             <div className="absolute right-0 top-14 w-80 bg-surface rounded-2xl shadow-xl border border-white p-4 z-50">
                                 <div className="flex items-center justify-between mb-4">
                                     <h3 className="font-bold text-stone-900">Notifications</h3>
-                                    <button className="text-xs text-primary hover:text-primary-content">Mark all read</button>
+                                    <button 
+                                        onClick={() => {
+                                            setNotificationsRead(true);
+                                            createToast('All notifications marked as read', 'success', setToasts);
+                                        }}
+                                        className="text-xs text-primary hover:text-primary-content"
+                                    >
+                                        Mark all read
+                                    </button>
                                 </div>
                                 <div className="space-y-2 max-h-96 overflow-y-auto">
-                                    <div className="p-3 rounded-xl bg-stone-50 hover:bg-stone-100 transition-colors">
-                                        <p className="text-sm font-bold text-stone-900">Settings updated</p>
-                                        <p className="text-xs text-stone-500">Your profile changes were saved</p>
-                                        <p className="text-[10px] text-stone-400 mt-1">5 minutes ago</p>
-                                    </div>
+                                    {!notificationsRead && (
+                                        <div className="p-3 rounded-xl bg-stone-50 hover:bg-stone-100 transition-colors">
+                                            <p className="text-sm font-bold text-stone-900">Settings updated</p>
+                                            <p className="text-xs text-stone-500">Your profile changes were saved</p>
+                                            <p className="text-[10px] text-stone-400 mt-1">5 minutes ago</p>
+                                        </div>
+                                    )}
+                                    {notificationsRead && (
+                                        <div className="p-8 text-center text-stone-400">
+                                            <span className="material-symbols-outlined text-4xl mb-2">notifications_none</span>
+                                            <p className="text-sm">No new notifications</p>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         )}
@@ -118,7 +162,6 @@ const Settings: React.FC = () => {
                                     </button>
                                 </div>
                                 <h2 className="text-xl font-bold text-stone-900">{profile.firstName} {profile.lastName}</h2>
-                                <p className="text-sm text-secondary mb-4">{profile.email}</p>
                                 <div className="inline-flex items-center px-3 py-1 rounded-full bg-primary/10 text-primary-content text-xs font-bold border border-primary/20">
                                     Top Rated Tutor
                                 </div>
@@ -182,13 +225,6 @@ const Settings: React.FC = () => {
                                         <div className="space-y-2">
                                             <label className="text-xs font-bold text-stone-500 uppercase tracking-wide">Last Name</label>
                                             <input id="last-name" name="last-name" className="w-full rounded-xl border-stone-200 bg-stone-50 px-4 py-3 text-sm font-medium text-stone-800 focus:border-primary focus:ring-primary/20 transition-all" type="text" defaultValue={profile.lastName} />
-                                        </div>
-                                        <div className="col-span-1 md:col-span-2 space-y-2">
-                                            <label className="text-xs font-bold text-stone-500 uppercase tracking-wide">Email Address</label>
-                                            <div className="flex items-center gap-2 relative">
-                                                <span className="material-symbols-outlined text-stone-400 absolute left-4 pointer-events-none text-[20px]">mail</span>
-                                                <input id="email" name="email" className="w-full rounded-xl border-stone-200 bg-stone-50 pl-12 pr-4 py-3 text-sm font-medium text-stone-800 focus:border-primary focus:ring-primary/20 transition-all" type="email" defaultValue={profile.email} />
-                                            </div>
                                         </div>
                                         <div className="col-span-1 md:col-span-2 space-y-2">
                                             <label className="text-xs font-bold text-stone-500 uppercase tracking-wide">Title / Role</label>
@@ -369,6 +405,51 @@ const Settings: React.FC = () => {
                                         </div>
                                         <span className="material-symbols-outlined text-stone-400 group-hover:translate-x-1 transition-transform">chevron_right</span>
                                     </button>
+                                    <button 
+                                        onClick={handleLogout}
+                                        className="w-full flex items-center justify-between p-4 rounded-2xl bg-stone-50 border border-stone-100 hover:border-primary hover:bg-white transition-all group mt-6"
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <div className="size-10 rounded-full bg-stone-200 flex items-center justify-center group-hover:bg-primary group-hover:text-primary-content transition-colors">
+                                                <span className="material-symbols-outlined text-[20px]">logout</span>
+                                            </div>
+                                            <div className="text-left">
+                                                <span className="block text-sm font-bold text-stone-800">Logout</span>
+                                                <span className="block text-xs text-stone-500">Sign out of your account</span>
+                                            </div>
+                                        </div>
+                                        <span className="material-symbols-outlined text-stone-400 group-hover:translate-x-1 transition-transform">chevron_right</span>
+                                    </button>
+                                    <button 
+                                        onClick={() => setShowRemoveAllDataModal(true)}
+                                        className="w-full flex items-center justify-between p-4 rounded-2xl bg-orange-50 border border-orange-200 hover:border-orange-300 hover:bg-orange-100 transition-all group mt-4"
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <div className="size-10 rounded-full bg-orange-200 flex items-center justify-center group-hover:bg-orange-500 group-hover:text-white transition-colors">
+                                                <span className="material-symbols-outlined text-[20px]">delete_sweep</span>
+                                            </div>
+                                            <div className="text-left">
+                                                <span className="block text-sm font-bold text-orange-900">Remove All Data</span>
+                                                <span className="block text-xs text-orange-700">Clear all students, sessions, and earnings</span>
+                                            </div>
+                                        </div>
+                                        <span className="material-symbols-outlined text-orange-400 group-hover:translate-x-1 transition-transform">chevron_right</span>
+                                    </button>
+                                    <button 
+                                        onClick={() => setShowDeleteAccountModal(true)}
+                                        className="w-full flex items-center justify-between p-4 rounded-2xl bg-red-50 border border-red-200 hover:border-red-300 hover:bg-red-100 transition-all group mt-4"
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <div className="size-10 rounded-full bg-red-200 flex items-center justify-center group-hover:bg-red-500 group-hover:text-white transition-colors">
+                                                <span className="material-symbols-outlined text-[20px]">warning</span>
+                                            </div>
+                                            <div className="text-left">
+                                                <span className="block text-sm font-bold text-red-900">Delete Account</span>
+                                                <span className="block text-xs text-red-700">Permanently delete your account and all data</span>
+                                            </div>
+                                        </div>
+                                        <span className="material-symbols-outlined text-red-400 group-hover:translate-x-1 transition-transform">chevron_right</span>
+                                    </button>
                                 </div>
                             </div>
                             )}
@@ -512,6 +593,37 @@ const Settings: React.FC = () => {
                             className="flex-1 px-4 py-3 rounded-full bg-red-600 text-white font-bold text-sm hover:bg-red-700 transition-colors"
                         >
                             Delete Account
+                        </button>
+                    </div>
+                </div>
+            </Modal>
+
+            <Modal isOpen={showRemoveAllDataModal} onClose={() => setShowRemoveAllDataModal(false)} title="Remove All Data" size="sm">
+                <div className="space-y-4">
+                    <p className="text-sm text-stone-600">Are you sure you want to remove all data? This will clear all students, sessions, earnings, and other app data. This action cannot be undone.</p>
+                    <div className="p-4 rounded-xl bg-orange-50 border border-orange-200">
+                        <p className="text-xs font-bold text-orange-900 mb-1">Warning</p>
+                        <p className="text-xs text-orange-700">This will permanently delete:</p>
+                        <ul className="text-xs text-orange-700 mt-2 ml-4 list-disc">
+                            <li>All students and their data</li>
+                            <li>All scheduled sessions</li>
+                            <li>All earnings and transactions</li>
+                            <li>All demo data</li>
+                        </ul>
+                        <p className="text-xs text-orange-700 mt-2">Your profile settings will be reset to defaults.</p>
+                    </div>
+                    <div className="flex gap-3 pt-4">
+                        <button 
+                            onClick={() => setShowRemoveAllDataModal(false)}
+                            className="flex-1 px-4 py-3 rounded-full border border-stone-200 text-stone-600 font-bold text-sm hover:bg-stone-50 transition-colors"
+                        >
+                            Cancel
+                        </button>
+                        <button 
+                            onClick={handleRemoveAllData}
+                            className="flex-1 px-4 py-3 rounded-full bg-orange-600 text-white font-bold text-sm hover:bg-orange-700 transition-colors"
+                        >
+                            Remove All Data
                         </button>
                     </div>
                 </div>
