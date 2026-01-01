@@ -16,7 +16,7 @@ const Dashboard: React.FC = () => {
     const navigate = useNavigate();
     const { hasDemoData, getDemoData } = useDemoData();
     const { profile } = useUserProfile();
-    const { allScheduleItems, currentDate, setCurrentDate, addScheduleItem } = useSchedule();
+    const { allScheduleItems, currentDate, setCurrentDate, addScheduleItem, recurringItems } = useSchedule();
     const { students } = useStudents();
     const { transactions } = useEarnings();
     const [showNotifications, setShowNotifications] = useState(false);
@@ -631,6 +631,56 @@ const Dashboard: React.FC = () => {
                                         )}
                                     </div>
                                 </div>
+                            </div>
+                        </div>
+
+                        {/* Recurring Sessions Widget */}
+                        <div className="md:col-span-12 xl:col-span-3">
+                            <div className="bg-surface rounded-3xl p-6 bento-card shadow-card border border-white flex flex-col">
+                                <div className="flex justify-between items-start mb-4">
+                                    <h3 className="text-lg font-bold text-stone-800">This Week's Recurring Sessions</h3>
+                                    <button 
+                                        onClick={() => navigate('/schedule')}
+                                        className="text-xs font-bold text-primary hover:text-primary-content transition-colors"
+                                    >
+                                        View All
+                                    </button>
+                                </div>
+                                {(() => {
+                                    const thisWeekRecurring = recurringItems.length;
+                                    const studentsWithRecurring = students.filter(s => 
+                                        s.status === 'Active' && s.weeklySchedule && s.weeklySchedule.length > 0
+                                    );
+                                    
+                                    return (
+                                        <div className="space-y-3 flex-1">
+                                            <div className="flex items-center gap-2 mb-3">
+                                                <span className="text-2xl font-bold text-stone-900">{thisWeekRecurring}</span>
+                                                <span className="text-sm text-stone-600">recurring session{thisWeekRecurring !== 1 ? 's' : ''} this week</span>
+                                            </div>
+                                            <div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar">
+                                                {studentsWithRecurring.length === 0 ? (
+                                                    <p className="text-xs text-stone-400 italic text-center py-4">No recurring schedules set</p>
+                                                ) : (
+                                                    studentsWithRecurring.slice(0, 5).map(student => {
+                                                        const scheduleCount = student.weeklySchedule?.length || 0;
+                                                        return (
+                                                            <div key={student.id} className="flex items-center gap-3 p-2 rounded-lg bg-stone-50 hover:bg-stone-100 transition-colors">
+                                                                <div className={`size-8 rounded-full bg-${student.color}-100 text-${student.color}-700 flex items-center justify-center font-bold text-xs`}>
+                                                                    {student.initials}
+                                                                </div>
+                                                                <div className="flex-1 min-w-0">
+                                                                    <p className="text-xs font-bold text-stone-800 truncate">{student.name}</p>
+                                                                    <p className="text-[10px] text-stone-500">{scheduleCount} session{scheduleCount !== 1 ? 's' : ''}/week</p>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })
+                                                )}
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
                             </div>
                         </div>
 

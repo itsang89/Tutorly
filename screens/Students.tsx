@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { Student, WeeklyScheduleSlot } from '../types';
 import Modal from '../components/Modal';
 import { ToastContainer, createToast } from '../components/Toast';
@@ -6,6 +6,8 @@ import { useDemoData } from '../contexts/DemoDataContext';
 import { useUserProfile } from '../contexts/UserProfileContext';
 import { useStudents } from '../contexts/StudentsContext';
 import { useSchedule } from '../contexts/ScheduleContext';
+import RecurringScheduleBadge from '../components/RecurringScheduleBadge';
+import RecurringScheduleEditor from '../components/RecurringScheduleEditor';
 
 const Students: React.FC = () => {
     const { hasDemoData, getDemoData } = useDemoData();
@@ -22,6 +24,14 @@ const Students: React.FC = () => {
     const [toasts, setToasts] = useState<Array<{ id: string; message: string; type?: 'success' | 'error' | 'info' | 'warning' }>>([]);
     const [newScheduleSlot, setNewScheduleSlot] = useState<Partial<WeeklyScheduleSlot>>({ day: 0, startTime: 9, duration: 1 });
     const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+    const scheduleSectionRef = useRef<HTMLDivElement>(null);
+    const [selectedStudents, setSelectedStudents] = useState<Set<string>>(new Set());
+    const [showBulkActions, setShowBulkActions] = useState(false);
+    const [showBulkActionModal, setShowBulkActionModal] = useState(false);
+    const [bulkActionType, setBulkActionType] = useState<'copy' | 'template' | 'time' | null>(null);
+    const [bulkSourceStudent, setBulkSourceStudent] = useState<Student | null>(null);
+    const [bulkTemplate, setBulkTemplate] = useState<WeeklyScheduleSlot[] | null>(null);
+    const [bulkTimeChange, setBulkTimeChange] = useState<{ time?: number; duration?: number }>({});
 
     const filteredStudents = useMemo(() => {
         return students.filter(student => {
@@ -248,6 +258,96 @@ const Students: React.FC = () => {
         }
     }, [students, showEditModal]);
 
+    // Scroll to schedule section when opening edit modal from badge
+    useEffect(() => {
+        if (showEditModal && scheduleSectionRef.current) {
+            // Small delay to ensure modal is rendered
+            setTimeout(() => {
+                scheduleSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }, 100);
+        }
+    }, [showEditModal]);
+
+    const handleEditRecurringSchedule = useCallback((student: Student) => {
+        setShowEditModal(student);
+        // Scroll will happen via useEffect
+    }, []);
+
+    // Bulk selection handlers
+    const handleSelectStudent = useCallback((studentId: string) => {
+        setSelectedStudents(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(studentId)) {
+                newSet.delete(studentId);
+            } else {
+                newSet.add(studentId);
+            }
+            return newSet;
+        });
+    }, []);
+
+    const handleSelectAll = useCallback(() => {
+        if (selectedStudents.size === filteredStudents.length) {
+            setSelectedStudents(new Set());
+        } else {
+            setSelectedStudents(new Set(filteredStudents.map(s => s.id)));
+        }
+    }, [filteredStudents, selectedStudents.size]);
+
+    // Bulk action handlers
+    const handleBulkCopySchedule = useCallback(() => {
+        if (selectedStudents.size === 0) return;
+        setBulkActionType('copy');
+        setShowBulkActionModal(true);
+    }, [selectedStudents.size]);
+
+    const handleBulkApplyTemplate = useCallback(() => {
+        if (selectedStudents.size === 0) return;
+        setBulkActionType('template');
+        setShowBulkActionModal(true);
+    }, [selectedStudents.size]);
+
+    const handleBulkUpdateTime = useCallback(() => {
+        if (selectedStudents.size === 0) return;
+        setBulkActionType('time');
+        setShowBulkActionModal(true);
+    }, [selectedStudents.size]);
+
+    const handleConfirmBulkAction = useCallback(() => {
+        if (selectedStudents.size === 0) return;
+
+        selectedStudents.forEach(studentId => {
+            if (bulkActionType === 'copy' && bulkSourceStudent?.weeklySchedule) {
+                updateStudent(studentId, { weeklySchedule: bulkSourceStudent.weeklySchedule });
+            } else if (bulkActionType === 'template' && bulkTemplate) {
+                updateStudent(studentId, { weeklySchedule: bulkTemplate });
+            } else if (bulkActionType === 'time') {
+                const student = students.find(s => s.id === studentId);
+                if (student?.weeklySchedule) {
+                    const updatedSchedule = student.weeklySchedule.map(slot => ({
+                        ...slot,
+                        startTime: bulkTimeChange.time ?? slot.startTime,
+                        duration: bulkTimeChange.duration ?? slot.duration
+                    }));
+                    updateStudent(studentId, { weeklySchedule: updatedSchedule });
+                }
+            }
+        });
+
+        createToast(`Updated ${selectedStudents.size} student(s)`, 'success', setToasts);
+        setSelectedStudents(new Set());
+        setShowBulkActionModal(false);
+        setBulkActionType(null);
+        setBulkSourceStudent(null);
+        setBulkTemplate(null);
+        setBulkTimeChange({});
+    }, [selectedStudents, bulkActionType, bulkSourceStudent, bulkTemplate, bulkTimeChange, students, updateStudent]);
+
+    // Update showBulkActions based on selection
+    useEffect(() => {
+        setShowBulkActions(selectedStudents.size > 0);
+    }, [selectedStudents.size]);
+
     return (
         <>
             <header className="hidden lg:flex items-center justify-between px-10 py-8 shrink-0 z-20">
@@ -336,6 +436,39 @@ const Students: React.FC = () => {
 
                     <div className="bg-surface border border-white shadow-card rounded-[2rem] overflow-hidden flex flex-col h-[calc(100vh-340px)] min-h-[500px]">
                         <div className="p-6 border-b border-stone-100 flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between bg-surface-secondary">
+                            {showBulkActions && (
+                                <div className="flex items-center gap-2">
+                                    <span className="text-xs font-bold text-stone-600">
+                                        {selectedStudents.size} selected
+                                    </span>
+                                    <div className="flex gap-1">
+                                        <button
+                                            onClick={handleBulkCopySchedule}
+                                            className="px-3 py-1.5 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 text-xs font-bold hover:bg-blue-100 transition-colors"
+                                        >
+                                            Copy Schedule
+                                        </button>
+                                        <button
+                                            onClick={handleBulkApplyTemplate}
+                                            className="px-3 py-1.5 rounded-lg bg-green-50 border border-green-200 text-green-700 text-xs font-bold hover:bg-green-100 transition-colors"
+                                        >
+                                            Apply Template
+                                        </button>
+                                        <button
+                                            onClick={handleBulkUpdateTime}
+                                            className="px-3 py-1.5 rounded-lg bg-purple-50 border border-purple-200 text-purple-700 text-xs font-bold hover:bg-purple-100 transition-colors"
+                                        >
+                                            Update Time
+                                        </button>
+                                        <button
+                                            onClick={() => setSelectedStudents(new Set())}
+                                            className="px-3 py-1.5 rounded-lg bg-stone-100 text-stone-700 text-xs font-bold hover:bg-stone-200 transition-colors"
+                                        >
+                                            Clear
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
                             <div className="flex gap-2 bg-stone-100 p-1 rounded-full">
                                 <button 
                                     onClick={() => setStatusFilter('all')}
@@ -406,10 +539,20 @@ const Students: React.FC = () => {
                                 <table className="w-full text-left border-separate border-spacing-y-2 min-w-[800px]">
                                 <thead className="text-[11px] font-bold text-stone-400 uppercase tracking-widest sticky top-0 bg-surface z-10">
                                     <tr>
+                                        <th className="px-6 py-3 bg-surface w-12">
+                                            <input
+                                                type="checkbox"
+                                                checked={selectedStudents.size === filteredStudents.length && filteredStudents.length > 0}
+                                                onChange={handleSelectAll}
+                                                className="rounded border-stone-300 text-primary focus:ring-primary/50"
+                                                aria-label="Select all students"
+                                            />
+                                        </th>
                                         <th className="px-6 py-3 bg-surface">Student Info</th>
                                         <th className="px-6 py-3 bg-surface">Subject</th>
                                         <th className="px-6 py-3 bg-surface">Price/Hour</th>
                                         <th className="px-6 py-3 bg-surface">Progress</th>
+                                        <th className="px-6 py-3 bg-surface">Recurring Schedule</th>
                                         <th className="px-6 py-3 bg-surface">Next Session</th>
                                         <th className="px-6 py-3 bg-surface text-center">Status</th>
                                         <th className="px-6 py-3 bg-surface text-right">Actions</th>
@@ -418,6 +561,15 @@ const Students: React.FC = () => {
                                 <tbody className="text-sm">
                                     {filteredStudents.length > 0 ? filteredStudents.map((student) => (
                                         <tr key={student.id} className="group hover:bg-[#FDFCF8] transition-all duration-200">
+                                            <td className="px-6 py-4 border-y border-transparent bg-white group-hover:border-border">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={selectedStudents.has(student.id)}
+                                                    onChange={() => handleSelectStudent(student.id)}
+                                                    className="rounded border-stone-300 text-primary focus:ring-primary/50"
+                                                    aria-label={`Select ${student.name}`}
+                                                />
+                                            </td>
                                             <td className="px-6 py-4 rounded-l-2xl border-l border-y border-transparent bg-white group-hover:border-border">
                                                 <div className="flex items-center gap-4">
                                                     <div className={`size-10 rounded-full ${student.id === '2' ? 'bg-primary/20 text-primary-content' : 'bg-stone-100 text-stone-600'} flex items-center justify-center font-bold text-sm`}>{student.initials}</div>
@@ -440,6 +592,12 @@ const Students: React.FC = () => {
                                             </td>
                                             <td className="px-6 py-4 border-y border-transparent bg-white group-hover:border-border">
                                                 <span className="text-xs font-bold text-stone-600">{student.progress || 'Not set'}</span>
+                                            </td>
+                                            <td className="px-6 py-4 border-y border-transparent bg-white group-hover:border-border">
+                                                <RecurringScheduleBadge 
+                                                    schedule={student.weeklySchedule || []}
+                                                    onEdit={() => handleEditRecurringSchedule(student)}
+                                                />
                                             </td>
                                              <td className="px-6 py-4 border-y border-transparent bg-white group-hover:border-border">
                                                 <div className="flex flex-col">
@@ -486,7 +644,7 @@ const Students: React.FC = () => {
                                         </tr>
                                     )) : (
                                         <tr>
-                                            <td colSpan={7} className="px-6 py-12 text-center">
+                                            <td colSpan={9} className="px-6 py-12 text-center">
                                                 <div className="flex flex-col items-center gap-3">
                                                     <span className="material-symbols-outlined text-5xl text-stone-300">group</span>
                                                     <div>
@@ -644,91 +802,15 @@ const Students: React.FC = () => {
                         </div>
                         
                         {/* Weekly Schedule */}
-                        <div className="space-y-3 pt-4 border-t border-stone-200">
-                            <div className="flex items-center justify-between">
-                                <div>
-                                    <label className="block text-xs font-bold text-stone-700 uppercase tracking-wide mb-2">Weekly Recurring Schedule</label>
-                                    <p className="text-xs text-stone-500">Set recurring lessons that appear every week</p>
-                                </div>
-                            </div>
-                            <div className="space-y-3">
-                                {(showEditModal.weeklySchedule || []).map((slot, index) => {
-                                    const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-                                    const hour = Math.floor(slot.startTime);
-                                    const minutes = (slot.startTime % 1) * 60;
-                                    const timeStr = `${hour}:${minutes === 0 ? '00' : minutes} ${hour >= 12 ? 'PM' : 'AM'}`;
-                                    return (
-                                        <div key={index} className="flex items-center gap-2 p-3 rounded-xl bg-stone-50 border border-stone-200">
-                                            <div className="flex-1">
-                                                <span className="text-sm font-bold text-stone-800">{dayNames[slot.day]}</span>
-                                                <span className="text-xs text-stone-600 ml-2">{timeStr}</span>
-                                                <span className="text-xs text-stone-600 ml-2">({slot.duration}h)</span>
-                                            </div>
-                                            <button
-                                                type="button"
-                                                onClick={() => handleRemoveScheduleSlot(index)}
-                                                aria-label={`Remove schedule slot for ${dayNames[slot.day]}`}
-                                                className="text-red-600 hover:text-red-700 transition-colors focus:ring-2 focus:ring-red-500/50 focus:outline-none rounded"
-                                            >
-                                                <span className="material-symbols-outlined text-[18px]" aria-hidden="true">delete</span>
-                                            </button>
-                                        </div>
-                                    );
-                                })}
-                                {(!showEditModal.weeklySchedule || showEditModal.weeklySchedule.length === 0) && (
-                                    <p className="text-xs text-stone-400 italic text-center py-2">No recurring schedule set</p>
-                                )}
-                            </div>
-                            <div className="grid grid-cols-3 gap-2 pt-2">
-                                <select
-                                    value={newScheduleSlot.day ?? 0}
-                                    onChange={(e) => setNewScheduleSlot({ ...newScheduleSlot, day: parseInt(e.target.value) })}
-                                    className="rounded-xl border-stone-200 bg-stone-50 px-3 py-2 text-sm font-medium text-stone-800 focus:border-primary focus:ring-primary/20 transition-all"
-                                >
-                                    <option value={0}>Monday</option>
-                                    <option value={1}>Tuesday</option>
-                                    <option value={2}>Wednesday</option>
-                                    <option value={3}>Thursday</option>
-                                    <option value={4}>Friday</option>
-                                    <option value={5}>Saturday</option>
-                                    <option value={6}>Sunday</option>
-                                </select>
-                                <input
-                                    type="time"
-                                    value={newScheduleSlot.startTime !== undefined ? (() => {
-                                        const hour = Math.floor(newScheduleSlot.startTime);
-                                        const minutes = Math.round((newScheduleSlot.startTime % 1) * 60);
-                                        return `${hour.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
-                                    })() : ''}
-                                    onChange={(e) => {
-                                        if (e.target.value) {
-                                            const [hours, minutes] = e.target.value.split(':').map(Number);
-                                            setNewScheduleSlot({ ...newScheduleSlot, startTime: hours + (minutes / 60) });
-                                        }
-                                    }}
-                                    className="rounded-xl border-stone-200 bg-stone-50 px-3 py-2 text-sm font-medium text-stone-800 focus:border-primary focus:ring-primary/20 transition-all"
-                                />
-                                <div className="flex gap-2">
-                                    <input
-                                        type="number"
-                                        min="0.5"
-                                        max="4"
-                                        step="0.5"
-                                        value={newScheduleSlot.duration ?? 1}
-                                        onChange={(e) => setNewScheduleSlot({ ...newScheduleSlot, duration: parseFloat(e.target.value) })}
-                                        placeholder="Duration (h)"
-                                        className="flex-1 rounded-xl border-stone-200 bg-stone-50 px-3 py-2 text-sm font-medium text-stone-800 focus:border-primary focus:ring-primary/20 transition-all"
-                                    />
-                                    <button
-                                        type="button"
-                                        onClick={handleAddScheduleSlot}
-                                        aria-label="Add schedule slot"
-                                        className="px-3 py-2 rounded-xl bg-accent text-white text-sm font-bold hover:bg-stone-800 transition-colors focus:ring-2 focus:ring-primary/50 focus:outline-none"
-                                    >
-                                        Add
-                                    </button>
-                                </div>
-                            </div>
+                        <div ref={scheduleSectionRef} className="pt-4 border-t border-stone-200">
+                            <RecurringScheduleEditor
+                                schedule={showEditModal.weeklySchedule || []}
+                                onScheduleChange={(newSchedule) => {
+                                    updateStudent(showEditModal.id, { weeklySchedule: newSchedule });
+                                    setShowEditModal({ ...showEditModal, weeklySchedule: newSchedule });
+                                }}
+                                studentId={showEditModal.id}
+                            />
                         </div>
                         
                         <div className="flex gap-3 pt-4">
@@ -763,9 +845,172 @@ const Students: React.FC = () => {
                 )}
             </Modal>
 
+            {/* Bulk Action Modal */}
+            <Modal
+                isOpen={showBulkActionModal}
+                onClose={() => {
+                    setShowBulkActionModal(false);
+                    setBulkActionType(null);
+                    setBulkSourceStudent(null);
+                    setBulkTemplate(null);
+                    setBulkTimeChange({});
+                }}
+                title={
+                    bulkActionType === 'copy' ? 'Copy Schedule to Selected Students' :
+                    bulkActionType === 'template' ? 'Apply Template to Selected Students' :
+                    'Update Time for Selected Students'
+                }
+                size="md"
+            >
+                <div className="space-y-4">
+                    {bulkActionType === 'copy' && (
+                        <>
+                            <p className="text-sm text-stone-600">
+                                Select a student whose schedule you want to copy to {selectedStudents.size} selected student(s).
+                            </p>
+                            <div className="max-h-64 overflow-y-auto rounded-xl border border-stone-200 bg-white custom-scrollbar">
+                                <div className="divide-y divide-stone-100">
+                                    {students.filter(s => !selectedStudents.has(s.id)).map((student) => (
+                                        <button
+                                            key={student.id}
+                                            type="button"
+                                            onClick={() => setBulkSourceStudent(student)}
+                                            className={`w-full p-4 text-left hover:bg-stone-50 transition-colors ${
+                                                bulkSourceStudent?.id === student.id ? 'bg-primary/10 border-l-4 border-primary' : ''
+                                            }`}
+                                        >
+                                            <div className="flex items-center gap-4">
+                                                <div className={`size-10 rounded-full ${
+                                                    bulkSourceStudent?.id === student.id 
+                                                        ? 'bg-primary/20 text-primary-content' 
+                                                        : 'bg-stone-100 text-stone-600'
+                                                } flex items-center justify-center font-bold text-sm`}>
+                                                    {student.initials}
+                                                </div>
+                                                <div className="flex-1">
+                                                    <p className="text-sm font-bold text-stone-800">{student.name}</p>
+                                                    <p className="text-xs text-stone-500">
+                                                        {student.weeklySchedule?.length || 0} recurring session(s)
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        </>
+                    )}
+                    {bulkActionType === 'template' && (
+                        <>
+                            <p className="text-sm text-stone-600">
+                                Select a template to apply to {selectedStudents.size} selected student(s).
+                            </p>
+                            <div className="grid grid-cols-1 gap-2">
+                                {[
+                                    { name: 'Weekly (Same Time)', pattern: [{ day: 0, startTime: 14, duration: 1 }] },
+                                    { name: 'Twice Per Week', pattern: [{ day: 0, startTime: 14, duration: 1 }, { day: 3, startTime: 14, duration: 1 }] },
+                                    { name: 'Mon/Wed/Fri', pattern: [{ day: 0, startTime: 14, duration: 1 }, { day: 2, startTime: 14, duration: 1 }, { day: 4, startTime: 14, duration: 1 }] }
+                                ].map((template, index) => (
+                                    <button
+                                        key={index}
+                                        type="button"
+                                        onClick={() => setBulkTemplate(template.pattern)}
+                                        className={`p-3 rounded-xl border text-left transition-colors ${
+                                            JSON.stringify(bulkTemplate) === JSON.stringify(template.pattern)
+                                                ? 'bg-primary/10 border-primary'
+                                                : 'bg-stone-50 border-stone-200 hover:bg-stone-100'
+                                        }`}
+                                    >
+                                        <p className="text-sm font-bold text-stone-800">{template.name}</p>
+                                        <p className="text-xs text-stone-500">{template.pattern.length} session(s) per week</p>
+                                    </button>
+                                ))}
+                            </div>
+                        </>
+                    )}
+                    {bulkActionType === 'time' && (
+                        <>
+                            <p className="text-sm text-stone-600">
+                                Update time and/or duration for {selectedStudents.size} selected student(s).
+                            </p>
+                            <div className="space-y-3">
+                                <div>
+                                    <label className="block text-xs font-bold text-stone-700 uppercase tracking-wide mb-2">
+                                        New Start Time (optional)
+                                    </label>
+                                    <input
+                                        type="time"
+                                        value={bulkTimeChange.time !== undefined ? (() => {
+                                            const hour = Math.floor(bulkTimeChange.time);
+                                            const minutes = Math.round((bulkTimeChange.time % 1) * 60);
+                                            return `${hour.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+                                        })() : ''}
+                                        onChange={(e) => {
+                                            if (e.target.value) {
+                                                const [hours, minutes] = e.target.value.split(':').map(Number);
+                                                setBulkTimeChange({ ...bulkTimeChange, time: hours + (minutes / 60) });
+                                            } else {
+                                                setBulkTimeChange({ ...bulkTimeChange, time: undefined });
+                                            }
+                                        }}
+                                        className="w-full rounded-xl border-stone-200 bg-stone-50 px-4 py-3 text-sm font-medium text-stone-800 focus:border-primary focus:ring-2 focus:ring-primary/50 focus:outline-none transition-all"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-stone-700 uppercase tracking-wide mb-2">
+                                        New Duration (hours, optional)
+                                    </label>
+                                    <input
+                                        type="number"
+                                        min="0.5"
+                                        max="4"
+                                        step="0.5"
+                                        value={bulkTimeChange.duration ?? ''}
+                                        onChange={(e) => {
+                                            const value = e.target.value ? parseFloat(e.target.value) : undefined;
+                                            setBulkTimeChange({ ...bulkTimeChange, duration: value });
+                                        }}
+                                        className="w-full rounded-xl border-stone-200 bg-stone-50 px-4 py-3 text-sm font-medium text-stone-800 focus:border-primary focus:ring-2 focus:ring-primary/50 focus:outline-none transition-all"
+                                        placeholder="Leave empty to keep current"
+                                    />
+                                </div>
+                            </div>
+                        </>
+                    )}
+                    <div className="flex gap-3 pt-4 border-t border-stone-100">
+                        <button
+                            onClick={() => {
+                                setShowBulkActionModal(false);
+                                setBulkActionType(null);
+                                setBulkSourceStudent(null);
+                                setBulkTemplate(null);
+                                setBulkTimeChange({});
+                            }}
+                            className="flex-1 px-4 py-3 rounded-full border border-stone-200 text-stone-600 font-bold text-sm hover:bg-stone-50 transition-colors"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            onClick={handleConfirmBulkAction}
+                            disabled={
+                                (bulkActionType === 'copy' && !bulkSourceStudent) ||
+                                (bulkActionType === 'template' && !bulkTemplate) ||
+                                (bulkActionType === 'time' && !bulkTimeChange.time && !bulkTimeChange.duration)
+                            }
+                            className="flex-1 px-4 py-3 rounded-full bg-accent text-white font-bold text-sm hover:bg-stone-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            Apply to {selectedStudents.size} Student(s)
+                        </button>
+                    </div>
+                </div>
+            </Modal>
+
             <ToastContainer toasts={toasts} removeToast={removeToast} />
         </>
     );
 };
 
 export default Students;
+
+
+

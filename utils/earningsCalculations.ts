@@ -68,3 +68,5 @@ export const calculateAverageHourlyRate = (transactions: Transaction[]): number 
     return totalHours > 0 ? totalBalance / totalHours : 0;
 };
 
+
+

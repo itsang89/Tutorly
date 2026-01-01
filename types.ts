@@ -41,4 +41,25 @@ export interface ScheduleItem {
     isGroup?: boolean;
     date?: string; // ISO date string for specific lessons (optional for recurring)
     studentId?: string; // ID of the student for this lesson
+    recurrenceRuleId?: string | null; // ID of the recurring rule that generated this session
+}
+
+export interface RecurringException {
+    id: string;
+    recurrenceRuleId: string;
+    date: string; // ISO date string
+    type: 'skip' | 'timeChange' | 'durationChange';
+    newTime?: number; // For timeChange
+    newDuration?: number; // For durationChange
+}
+
+export interface RecurringRule {
+    id: string;
+    studentId: string;
+    dayOfWeek: number; // 0-6 (Mon-Sun)
+    startTime: number; // Decimal hours
+    duration: number; // Hours
+    startDate: string; // ISO date
+    endDate: string | null; // ISO date or null for ongoing
+    frequency: 'weekly' | 'biweekly' | 'monthly';
 }

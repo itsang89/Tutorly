@@ -5,13 +5,15 @@ import { ToastContainer, createToast } from '../components/Toast';
 import { useSchedule } from '../contexts/ScheduleContext';
 import { useStudents } from '../contexts/StudentsContext';
 import { useEarnings } from '../contexts/EarningsContext';
+import { RecurringException } from '../types';
+import { shouldSkipSessionForDate, getModifiedSessionForDate } from '../utils/recurringSessions';
 
 type ViewType = 'week' | 'month' | 'day';
 
 const Schedule: React.FC = () => {
-    const { currentDate, setCurrentDate, allScheduleItems, addScheduleItem, removeScheduleItem } = useSchedule();
+    const { currentDate, setCurrentDate, allScheduleItems, addScheduleItem, removeScheduleItem, addRecurringException, recurringExceptions } = useSchedule();
     const { removeTransactionsByScheduleItemId } = useEarnings();
-    const { students } = useStudents();
+    const { students, updateStudent } = useStudents();
     const [viewType, setViewType] = useState<ViewType>('week');
     const [currentMonth, setCurrentMonth] = useState(new Date());
     const [showNewEventModal, setShowNewEventModal] = useState(false);
@@ -21,6 +23,8 @@ const Schedule: React.FC = () => {
     const [sessionDetailModalOpen, setSessionDetailModalOpen] = useState(false);
     const [selectedSession, setSelectedSession] = useState<typeof allScheduleItems[0] | null>(null);
     const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+    const [recurringDeleteModalOpen, setRecurringDeleteModalOpen] = useState(false);
+    const [recurringDeleteType, setRecurringDeleteType] = useState<'this' | 'future' | null>(null);
 
     const handleNewEvent = useCallback((data: {
         studentId: string;
@@ -90,20 +94,97 @@ const Schedule: React.FC = () => {
 
     const handleDeleteClick = useCallback(() => {
         if (selectedSession) {
-            // Check if this is a recurring item (can't delete those)
-            if (selectedSession.id.startsWith('recurring-')) {
-                createToast('Cannot delete recurring sessions. Remove them from the student\'s schedule instead.', 'warning', setToasts);
-                setSessionDetailModalOpen(false);
-                setSelectedSession(null);
+            // Check if this is a recurring item
+            const isRecurring = selectedSession.id.startsWith('recurring-') || selectedSession.recurrenceRuleId;
+            if (isRecurring) {
+                // Show recurring delete options modal
+                setRecurringDeleteModalOpen(true);
                 return;
             }
             setDeleteModalOpen(true);
         }
     }, [selectedSession]);
 
+    const handleRecurringDeleteOption = useCallback((type: 'this' | 'future') => {
+        setRecurringDeleteType(type);
+        setRecurringDeleteModalOpen(false);
+        setDeleteModalOpen(true);
+    }, []);
+
+    const handleDeleteThisOccurrence = useCallback(() => {
+        if (selectedSession && selectedSession.recurrenceRuleId) {
+            // Get the date for this occurrence based on current week view
+            const weekStart = new Date(currentDate);
+            weekStart.setDate(currentDate.getDate() - currentDate.getDay() + 1); // Monday of current week
+            const dayOfWeek = selectedSession.day;
+            const daysToAdd = dayOfWeek; // day is already 0-6 (Mon-Sun)
+            const occurrenceDate = new Date(weekStart);
+            occurrenceDate.setDate(weekStart.getDate() + daysToAdd);
+            const dateString = occurrenceDate.toISOString().split('T')[0];
+
+            // Create exception to skip this occurrence
+            const exception: RecurringException = {
+                id: `exception-${selectedSession.recurrenceRuleId}-${dateString}-${Date.now()}`,
+                recurrenceRuleId: selectedSession.recurrenceRuleId,
+                date: dateString,
+                type: 'skip'
+            };
+
+            addRecurringException(exception);
+            createToast('This occurrence has been skipped', 'success', setToasts);
+            setDeleteModalOpen(false);
+            setSessionDetailModalOpen(false);
+            setSelectedSession(null);
+            setRecurringDeleteType(null);
+        }
+    }, [selectedSession, addRecurringException, currentDate]);
+
+    const handleDeleteAllFuture = useCallback(() => {
+        if (selectedSession && selectedSession.studentId && selectedSession.recurrenceRuleId) {
+            // Find the student and update their weekly schedule
+            const student = students.find(s => s.id === selectedSession.studentId);
+            if (student && student.weeklySchedule) {
+                // Extract the slot index from the recurrenceRuleId
+                const ruleIdParts = selectedSession.recurrenceRuleId.split('-');
+                const slotIndex = parseInt(ruleIdParts[ruleIdParts.length - 1]) || 0;
+                
+                // Remove the specific slot from weekly schedule
+                const updatedSchedule = student.weeklySchedule.filter((_, index) => index !== slotIndex);
+                updateStudent(selectedSession.studentId, { weeklySchedule: updatedSchedule });
+                
+                createToast('All future occurrences have been removed', 'success', setToasts);
+                setDeleteModalOpen(false);
+                setSessionDetailModalOpen(false);
+                setSelectedSession(null);
+                setRecurringDeleteType(null);
+            }
+        }
+    }, [selectedSession, students, updateStudent]);
+
+    const handleEditRecurringPattern = useCallback(() => {
+        if (selectedSession && selectedSession.studentId) {
+            // Close current modal
+            setSessionDetailModalOpen(false);
+            setSelectedSession(null);
+            
+            // Find the student and trigger edit (this would ideally open the Students page edit modal)
+            // For now, show a toast directing user to Students page
+            createToast('Please edit the recurring schedule from the Students page', 'info', setToasts);
+        }
+    }, [selectedSession]);
+
     const handleConfirmDelete = useCallback(() => {
         if (selectedSession) {
-            // Remove the schedule item
+            // Check if this is a recurring delete action
+            if (recurringDeleteType === 'this') {
+                handleDeleteThisOccurrence();
+                return;
+            } else if (recurringDeleteType === 'future') {
+                handleDeleteAllFuture();
+                return;
+            }
+
+            // Regular one-time session delete
             removeScheduleItem(selectedSession.id);
             
             // Remove related earnings transactions
@@ -113,11 +194,13 @@ const Schedule: React.FC = () => {
             setDeleteModalOpen(false);
             setSessionDetailModalOpen(false);
             setSelectedSession(null);
+            setRecurringDeleteType(null);
         }
-    }, [selectedSession, removeScheduleItem, removeTransactionsByScheduleItemId]);
+    }, [selectedSession, recurringDeleteType, removeScheduleItem, removeTransactionsByScheduleItemId, handleDeleteThisOccurrence, handleDeleteAllFuture]);
 
     const handleCancelDelete = useCallback(() => {
         setDeleteModalOpen(false);
+        setRecurringDeleteType(null);
     }, []);
 
     const handleCloseDetailModal = useCallback(() => {
@@ -182,6 +265,7 @@ const Schedule: React.FC = () => {
 
     // Filter schedule items to only show those that belong to the current week
     // Also map one-time events to the correct day based on their actual date
+    // Apply exceptions to recurring sessions
     const filteredScheduleItems = useMemo(() => {
         if (!allScheduleItems || !Array.isArray(allScheduleItems)) {
             return [];
@@ -193,8 +277,24 @@ const Schedule: React.FC = () => {
         
         return allScheduleItems
             .filter(item => {
-                // Recurring items (no date property or id starts with 'recurring-') always show
+                // Recurring items (no date property or id starts with 'recurring-')
                 if (!item.date || item.id.startsWith('recurring-')) {
+                    // For recurring items, check if they should be skipped for any day in this week
+                    if (item.recurrenceRuleId) {
+                        // Check each day of the week for skip exceptions
+                        for (let i = 0; i < 7; i++) {
+                            const checkDate = new Date(start);
+                            checkDate.setDate(start.getDate() + i);
+                            const dateString = checkDate.toISOString().split('T')[0];
+                            
+                            // Only check the day that matches this recurring session
+                            if (i === item.day) {
+                                if (shouldSkipSessionForDate(item, dateString, recurringExceptions)) {
+                                    return false; // Skip this session for this week
+                                }
+                            }
+                        }
+                    }
                     return true;
                 }
                 
@@ -216,9 +316,27 @@ const Schedule: React.FC = () => {
                     const dayOfWeek = (itemDate.getDay() + 6) % 7; // Convert Sunday=0 to Monday=0
                     return { ...item, day: dayOfWeek };
                 }
+                
+                // For recurring items, apply time/duration modifications based on exceptions
+                if (item.recurrenceRuleId) {
+                    const { start } = getWeekDates();
+                    const checkDate = new Date(start);
+                    checkDate.setDate(start.getDate() + item.day);
+                    const dateString = checkDate.toISOString().split('T')[0];
+                    
+                    const modifications = getModifiedSessionForDate(item, dateString, recurringExceptions);
+                    if (modifications) {
+                        return {
+                            ...item,
+                            startTime: modifications.startTime ?? item.startTime,
+                            duration: modifications.duration ?? item.duration
+                        };
+                    }
+                }
+                
                 return item;
             });
-    }, [allScheduleItems, getWeekDates]);
+    }, [allScheduleItems, getWeekDates, recurringExceptions]);
 
     // Calculate sessions this week (only items in current week date range)
     const sessionsThisWeek = useMemo(() => {
@@ -686,11 +804,13 @@ const Schedule: React.FC = () => {
                                                                     accent: 'bg-accent text-white border-accent'
                                                                 };
                                                                 
+                                                                const isRecurring = item.id.startsWith('recurring-') || item.recurrenceRuleId !== null && item.recurrenceRuleId !== undefined;
+                                                                
                                                                 return (
                                                                         <div 
                                                                         key={item.id}
                                                                         onClick={() => handleSessionClick(item)}
-                                                                        className={`absolute ${colorClasses[item.color]} border-l-4 rounded-lg cursor-pointer hover:shadow-lg transition-all group overflow-hidden flex flex-col z-10`}
+                                                                        className={`absolute ${colorClasses[item.color]} border-l-4 rounded-lg cursor-pointer hover:shadow-lg transition-all group overflow-hidden flex flex-col z-10 relative`}
                                                                         style={{ 
                                                                             top: `${startPixels}px`,
                                                                             height: `${Math.max(heightPixels, 28)}px`,
@@ -703,7 +823,12 @@ const Schedule: React.FC = () => {
                                                                             marginRight: column < totalColumns - 1 ? '3px' : '0px'
                                                                         }}
                                                                     >
-                                                                        <p className={`text-[11px] font-bold leading-[1.3] ${item.color === 'accent' ? 'text-white' : ''} break-words`} style={{ wordBreak: 'break-word', overflowWrap: 'break-word' }}>
+                                                                        {isRecurring && (
+                                                                            <span className={`absolute top-1 right-1 material-symbols-outlined text-[12px] opacity-75 ${item.color === 'accent' ? 'text-white' : 'text-stone-600'}`} title="Recurring session">
+                                                                                repeat
+                                                                            </span>
+                                                                        )}
+                                                                        <p className={`text-[11px] font-bold leading-[1.3] ${item.color === 'accent' ? 'text-white' : ''} break-words ${isRecurring ? 'pr-4' : ''}`} style={{ wordBreak: 'break-word', overflowWrap: 'break-word' }}>
                                                                             {item.title}
                                                                         </p>
                                                                         {heightPixels > 32 && (
@@ -837,7 +962,7 @@ const Schedule: React.FC = () => {
                         stone: 'bg-stone-100 border-stone-200 text-stone-700',
                         accent: 'bg-accent text-white border-accent'
                     };
-                    const isRecurring = selectedSession.id.startsWith('recurring-');
+                    const isRecurring = selectedSession.id.startsWith('recurring-') || (selectedSession.recurrenceRuleId !== null && selectedSession.recurrenceRuleId !== undefined);
                     
                     return (
                         <div className="flex flex-col gap-6">
@@ -921,25 +1046,47 @@ const Schedule: React.FC = () => {
                             )}
 
                             {/* Action Buttons */}
-                            <div className="flex gap-3 pt-4 border-t border-stone-100">
+                            <div className="flex flex-col gap-3 pt-4 border-t border-stone-100">
                                 {!isRecurring && (
                                     <button
                                         onClick={handleDeleteClick}
-                                        className="flex-1 px-4 py-3 rounded-full bg-red-500 text-white font-medium hover:bg-red-600 transition-colors flex items-center justify-center gap-2"
+                                        className="w-full px-4 py-3 rounded-full bg-red-500 text-white font-medium hover:bg-red-600 transition-colors flex items-center justify-center gap-2"
                                     >
                                         <span className="material-symbols-outlined text-[20px]">delete</span>
                                         <span>Delete Session</span>
                                     </button>
                                 )}
                                 {isRecurring && (
-                                    <div className="flex-1 px-4 py-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-sm">
-                                        <p className="font-bold mb-1">Recurring Session</p>
-                                        <p className="text-xs">To remove this session, edit the student's weekly schedule.</p>
+                                    <div className="space-y-2">
+                                        <p className="text-xs font-bold text-stone-600 mb-2">Recurring Session Options:</p>
+                                        <div className="grid grid-cols-1 gap-2">
+                                            <button
+                                                onClick={() => handleRecurringDeleteOption('this')}
+                                                className="px-4 py-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 font-medium hover:bg-amber-100 transition-colors flex items-center justify-center gap-2 text-sm"
+                                            >
+                                                <span className="material-symbols-outlined text-[18px]">event_busy</span>
+                                                <span>Delete This Occurrence Only</span>
+                                            </button>
+                                            <button
+                                                onClick={() => handleRecurringDeleteOption('future')}
+                                                className="px-4 py-2.5 rounded-xl bg-red-50 border border-red-200 text-red-800 font-medium hover:bg-red-100 transition-colors flex items-center justify-center gap-2 text-sm"
+                                            >
+                                                <span className="material-symbols-outlined text-[18px]">delete_forever</span>
+                                                <span>Delete All Future Occurrences</span>
+                                            </button>
+                                            <button
+                                                onClick={handleEditRecurringPattern}
+                                                className="px-4 py-2.5 rounded-xl bg-blue-50 border border-blue-200 text-blue-800 font-medium hover:bg-blue-100 transition-colors flex items-center justify-center gap-2 text-sm"
+                                            >
+                                                <span className="material-symbols-outlined text-[18px]">edit</span>
+                                                <span>Edit Recurring Pattern</span>
+                                            </button>
+                                        </div>
                                     </div>
                                 )}
                                 <button
                                     onClick={handleCloseDetailModal}
-                                    className="px-4 py-3 rounded-full bg-stone-100 text-stone-700 font-medium hover:bg-stone-200 transition-colors"
+                                    className="w-full px-4 py-3 rounded-full bg-stone-100 text-stone-700 font-medium hover:bg-stone-200 transition-colors"
                                 >
                                     Close
                                 </button>
@@ -953,13 +1100,39 @@ const Schedule: React.FC = () => {
             <Modal
                 isOpen={deleteModalOpen}
                 onClose={handleCancelDelete}
-                title="Delete Session"
+                title={recurringDeleteType === 'this' ? 'Delete This Occurrence' : recurringDeleteType === 'future' ? 'Delete All Future Occurrences' : 'Delete Session'}
                 size="sm"
             >
                 <div className="flex flex-col gap-6">
-                    <p className="text-stone-600">
-                        Are you sure you want to delete the session <span className="font-bold text-stone-900">"{selectedSession?.title}"</span>? This action cannot be undone.
-                    </p>
+                    {recurringDeleteType === 'this' && (
+                        <>
+                            <p className="text-stone-600">
+                                Are you sure you want to skip this occurrence of <span className="font-bold text-stone-900">"{selectedSession?.title}"</span>? This will only affect this specific date.
+                            </p>
+                            <div className="p-3 rounded-xl bg-amber-50 border border-amber-200">
+                                <p className="text-xs text-amber-800">
+                                    <span className="font-bold">Note:</span> Future occurrences will continue as scheduled.
+                                </p>
+                            </div>
+                        </>
+                    )}
+                    {recurringDeleteType === 'future' && (
+                        <>
+                            <p className="text-stone-600">
+                                Are you sure you want to delete all future occurrences of <span className="font-bold text-stone-900">"{selectedSession?.title}"</span>? This will remove the recurring schedule permanently.
+                            </p>
+                            <div className="p-3 rounded-xl bg-red-50 border border-red-200">
+                                <p className="text-xs text-red-800">
+                                    <span className="font-bold">Warning:</span> This action cannot be undone. The recurring schedule will be removed from the student's profile.
+                                </p>
+                            </div>
+                        </>
+                    )}
+                    {!recurringDeleteType && (
+                        <p className="text-stone-600">
+                            Are you sure you want to delete the session <span className="font-bold text-stone-900">"{selectedSession?.title}"</span>? This action cannot be undone.
+                        </p>
+                    )}
                     <div className="flex gap-3 justify-end">
                         <button
                             onClick={handleCancelDelete}
@@ -969,9 +1142,13 @@ const Schedule: React.FC = () => {
                         </button>
                         <button
                             onClick={handleConfirmDelete}
-                            className="px-4 py-2 rounded-full bg-red-500 text-white font-medium hover:bg-red-600 transition-colors"
+                            className={`px-4 py-2 rounded-full font-medium transition-colors ${
+                                recurringDeleteType === 'future' 
+                                    ? 'bg-red-500 text-white hover:bg-red-600' 
+                                    : 'bg-red-500 text-white hover:bg-red-600'
+                            }`}
                         >
-                            Delete
+                            {recurringDeleteType === 'this' ? 'Skip This Occurrence' : recurringDeleteType === 'future' ? 'Delete All Future' : 'Delete'}
                         </button>
                     </div>
                 </div>
